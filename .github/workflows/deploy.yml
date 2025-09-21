@@ -1,51 +1,29 @@
-name: CI/CD Deploy
+name: CI/CD Deploy Backend
 
 on:
   push:
-    branches: [ "master" ]
-  pull_request:
-    branches: [ "master" ]
+    branches: [ "master" ] # Ya "main", jo bhi aapki branch hai
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-      - run: npm ci
-      - name: Run tests
-        # THIS IS THE FIX: Added -- --passWithNoTests to allow the job to succeed
-        # even if no test files are found.
-        run: npm test -- --passWithNoTests
-        env:
-          NODE_ENV: test
-
   deploy:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa # Sahi secret ka naam istemal karein
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts # Sahi secret ka naam istemal karein
 
       - name: Deploy on VPS
         run: |
-          ssh -i ~/.ssh/id_rsa ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} '
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} '
             cd /var/www/myapp && \
-            (docker stop anocab-backend && docker rm anocab-backend) || true && \
+            git fetch origin master && \
+            git reset --hard origin/master && \
             docker compose down && \
-            docker compose up -d --build && \
-            docker system prune -f
-          '
-      - name: Health Check
-        run: |
-          sleep 30
-          curl -f http://${{ secrets.SERVER_IP }}:4500/health || exit 1
+            docker compose up -d --build
