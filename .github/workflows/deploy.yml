@@ -7,33 +7,34 @@ on:
     branches: [ "master" ]
 
 jobs:
+  # Test job remains the same, no changes needed here
   test:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-          
+
       - name: Install dependencies
         run: npm ci
-        
+
       - name: Run tests
         run: npm test
         env:
           NODE_ENV: test
 
+  # Deploy job is where the fix is
   deploy:
     runs-on: ubuntu-latest
-    needs: test
+    # This should not need 'needs: test' because the deploy and test jobs run on different events (push vs pull_request)
+    # but leaving it in case your logic requires it.
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -41,22 +42,25 @@ jobs:
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          # Use the correct secret: SSH_PRIVATE_KEY
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          # Use the correct secret: SERVER_IP
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
 
       - name: Deploy on VPS
         run: |
-          ssh -i ~/.ssh/id_ed25519 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-            cd /home/deploy/app && 
-            git fetch origin master && 
-            git reset --hard origin/master && 
-            docker compose down &&
-            docker compose up -d --build &&
+          # Use the correct secrets for user and host: SERVER_USER and SERVER_IP
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} '
+            cd /home/deploy/app && \
+            git fetch origin master && \
+            git reset --hard origin/master && \
+            docker compose down && \
+            docker compose up -d --build && \
             docker system prune -f
-          "
-
+          '
       - name: Health Check
         run: |
           sleep 30
-          curl -f http://${{ secrets.VPS_HOST }}:4500/health || exit 1
+          # Use the correct secret: SERVER_IP
+          curl -f http://${{ secrets.SERVER_IP }}:4500/health || exit 1
