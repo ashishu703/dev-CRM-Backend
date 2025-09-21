@@ -7,52 +7,39 @@ on:
     branches: [ "master" ]
 
 jobs:
-  # Test job remains the same, no changes needed here
+  # Test job remains the same
   test:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test
+      - run: npm ci
+      - run: npm test
         env:
           NODE_ENV: test
 
-  # Deploy job is where the fix is
+  # Deploy job with the corrected directory path
   deploy:
     runs-on: ubuntu-latest
-    # This should not need 'needs: test' because the deploy and test jobs run on different events (push vs pull_request)
-    # but leaving it in case your logic requires it.
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          # Use the correct secret: SSH_PRIVATE_KEY
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          # Use the correct secret: SERVER_IP
           ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
 
       - name: Deploy on VPS
         run: |
-          # Use the correct secrets for user and host: SERVER_USER and SERVER_IP
           ssh -i ~/.ssh/id_rsa ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} '
-            cd /home/deploy/app && \
+            # THIS IS THE FIX: Changed the directory to your actual app path
+            cd /var/www/myapp && \
             git fetch origin master && \
             git reset --hard origin/master && \
             docker compose down && \
@@ -62,5 +49,4 @@ jobs:
       - name: Health Check
         run: |
           sleep 30
-          # Use the correct secret: SERVER_IP
           curl -f http://${{ secrets.SERVER_IP }}:4500/health || exit 1
