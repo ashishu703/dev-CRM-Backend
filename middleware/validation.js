@@ -1,9 +1,54 @@
 const Joi = require('joi');
 const { validationResult } = require('express-validator');
 
-// Validation schemas
 const schemas = {
-  // User registration
+  createUserSchema: Joi.object({
+    username: Joi.string().min(3).max(255).required(),
+    email: Joi.string().email().required(),
+    password: Joi.string().min(6).required(),
+    target: Joi.number().min(0).required(),
+    departmentType: Joi.string().min(1).max(50).optional(),
+    companyName: Joi.string().min(1).max(255).optional(),
+    headUserId: Joi.string().uuid().optional(),
+    headUserEmail: Joi.string().email().optional()
+  }),
+
+  updateUserSchema: Joi.object({
+    username: Joi.string().min(3).max(255).optional(),
+    email: Joi.string().email().optional(),
+    password: Joi.string().min(6).optional(),
+    departmentType: Joi.string().min(1).max(50).optional(),
+    companyName: Joi.string().min(1).max(255).optional(),
+    headUserId: Joi.string().uuid().optional(),
+    target: Joi.number().min(0).optional(),
+    isActive: Joi.boolean().optional(),
+    emailVerified: Joi.boolean().optional()
+  }),
+
+  updateStatusSchema: Joi.object({
+    isActive: Joi.boolean().required()
+  }),
+
+  createHeadSchema: Joi.object({
+    username: Joi.string().min(3).max(255).required(),
+    email: Joi.string().email().required(),
+    password: Joi.string().min(6).required(),
+    departmentType: Joi.string().min(1).max(50).required(),
+    companyName: Joi.string().min(1).max(255).required(),
+    target: Joi.number().min(0).default(0)
+  }),
+
+  updateHeadSchema: Joi.object({
+    username: Joi.string().min(3).max(255).optional(),
+    email: Joi.string().email().optional(),
+    password: Joi.string().min(6).optional(),
+    departmentType: Joi.string().min(1).max(50).optional(),
+    companyName: Joi.string().min(1).max(255).optional(),
+    target: Joi.number().min(0).optional(),
+    isActive: Joi.boolean().optional(),
+    emailVerified: Joi.boolean().optional()
+  }),
+
   register: Joi.object({
     username: Joi.string()
       .alphanum()
@@ -31,10 +76,10 @@ const schemas = {
         'any.required': 'Password is required'
       }),
     departmentType: Joi.string()
-      .valid('telesales', 'marketing_sales', 'office_sales')
+      .valid('marketing_sales', 'office_sales')
       .required()
       .messages({
-        'any.only': 'Department type must be one of: telesales, marketing_sales, office_sales',
+        'any.only': 'Department type must be one of: marketing_sales, office_sales',
         'any.required': 'Department type is required'
       }),
     companyName: Joi.string()
@@ -53,7 +98,8 @@ const schemas = {
       }),
     headUser: Joi.string()
       .allow('')
-      .when('role', { is: 'department_user', then: Joi.required().messages({ 'any.required': 'Head user is required for department users' }), otherwise: Joi.optional() })
+      .when('role', { is: 'department_user', then: Joi.required().messages({ 'any.required': 'Head user is required for department users' }), otherwise: Joi.optional() }),
+    monthlyTarget: Joi.number().min(0).optional()
   }),
 
   // User login
@@ -72,7 +118,6 @@ const schemas = {
       })
   }),
 
-  // Review submission
   submitReview: Joi.object({
     title: Joi.string()
       .min(1)
@@ -107,7 +152,6 @@ const schemas = {
       })
   }),
 
-  // Review update
   updateReview: Joi.object({
     title: Joi.string()
       .min(1)
@@ -209,13 +253,11 @@ const validate = (schemaName) => {
       });
     }
 
-    // Replace req.body with validated data
     req.body = value;
     next();
   };
 };
 
-// Query validation middleware
 const validateQuery = (schemaName) => {
   return (req, res, next) => {
     const schema = schemas[schemaName];
@@ -240,7 +282,6 @@ const validateQuery = (schemaName) => {
       });
     }
 
-    // Replace req.query with validated data
     req.query = value;
     next();
   };
@@ -250,23 +291,31 @@ module.exports = {
   validate,
   validateQuery,
   schemas,
-  // Express-validator middleware for leads and other express-validator schemas
   validateRequest: (validations, source = 'body') => {
     return async (req, res, next) => {
-      // Run all validations
-      await Promise.all(validations.map(validation => validation.run(req)));
+      try {
+        const validationArray = Array.isArray(validations) ? validations : [validations];
+        
+        await Promise.all(validationArray.map(validation => validation.run(req)));
 
-      // Check for validation errors
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+          return res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors.array()
+          });
+        }
+
+        next();
+      } catch (error) {
+        console.error('Validation middleware error:', error);
+        return res.status(500).json({
           success: false,
-          message: 'Validation failed',
-          errors: errors.array()
+          message: 'Validation middleware error',
+          error: error.message
         });
       }
-
-      next();
     };
   }
 }; 

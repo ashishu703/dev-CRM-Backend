@@ -122,32 +122,38 @@ class Lead extends BaseModel {
     `;
 
     const values = [];
+    let paramCount = 1;
 
     // Add filters
     if (filters.search) {
-      query += ` AND (name LIKE ? OR phone LIKE ? OR email LIKE ?)`;
+      query += ` AND (name ILIKE $${paramCount} OR phone ILIKE $${paramCount} OR email ILIKE $${paramCount})`;
       const searchTerm = `%${filters.search}%`;
-      values.push(searchTerm, searchTerm, searchTerm);
+      values.push(searchTerm);
+      paramCount += 1;
     }
 
     if (filters.state) {
-      query += ` AND state = ?`;
+      query += ` AND state = $${paramCount}`;
       values.push(filters.state);
+      paramCount += 1;
     }
 
     if (filters.productType) {
-      query += ` AND product_type = ?`;
+      query += ` AND product_type = $${paramCount}`;
       values.push(filters.productType);
+      paramCount += 1;
     }
 
     if (filters.connectedStatus) {
-      query += ` AND connected_status = ?`;
+      query += ` AND connected_status = $${paramCount}`;
       values.push(filters.connectedStatus);
+      paramCount += 1;
     }
 
     if (filters.createdBy) {
-      query += ` AND created_by = ?`;
+      query += ` AND created_by = $${paramCount}`;
       values.push(filters.createdBy);
+      paramCount += 1;
     }
 
     // Add ordering
@@ -155,12 +161,14 @@ class Lead extends BaseModel {
 
     // Add pagination
     if (pagination.limit) {
-      query += ` LIMIT ?`;
+      query += ` LIMIT $${paramCount}`;
       values.push(pagination.limit);
+      paramCount += 1;
 
       if (pagination.offset) {
-        query += ` OFFSET ?`;
+        query += ` OFFSET $${paramCount}`;
         values.push(pagination.offset);
+        paramCount += 1;
       }
     }
 
@@ -196,6 +204,7 @@ class Lead extends BaseModel {
 
     const updateFields = [];
     const values = [];
+    let paramCount = 1;
 
     Object.keys(updateData).forEach(key => {
       if (allowedFields.includes(key)) {
@@ -204,9 +213,10 @@ class Lead extends BaseModel {
                        key === 'leadSource' ? 'lead_source' :
                        key === 'customerType' ? 'customer_type' :
                        key === 'connectedStatus' ? 'connected_status' :
-                       key === 'finalStatus' ? 'final_status' : key;
+                       key === 'finalStatus' ? 'final_status' :
+                       key;
         
-        updateFields.push(`${dbField} = ?`);
+        updateFields.push(`${dbField} = $${paramCount++}`);
         values.push(updateData[key]);
       }
     });
@@ -221,7 +231,7 @@ class Lead extends BaseModel {
     const query = `
       UPDATE leads 
       SET ${updateFields.join(', ')} 
-      WHERE id = ?
+      WHERE id = $${paramCount}
     `;
 
     return await Lead.query(query, values);
@@ -229,7 +239,7 @@ class Lead extends BaseModel {
 
   // Delete lead
   async delete(id) {
-    const query = 'DELETE FROM leads WHERE id = ?';
+    const query = 'DELETE FROM leads WHERE id = $1';
     return await Lead.query(query, [id]);
   }
 

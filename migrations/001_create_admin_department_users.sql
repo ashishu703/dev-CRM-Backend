@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS admin_department_users (
     username VARCHAR(255) NOT NULL UNIQUE,
     email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
-    department_type VARCHAR(50) NOT NULL CHECK (department_type IN ('telesales', 'marketing_sales', 'office_sales')),
+    department_type VARCHAR(50) NOT NULL CHECK (department_type IN ('marketing_sales', 'office_sales')),
     company_name VARCHAR(255) NOT NULL CHECK (company_name IN ('Anode Electric Pvt. Ltd.', 'Anode Metals', 'Samrridhi Industries')),
     role VARCHAR(50) NOT NULL CHECK (role IN ('department_user', 'department_head')),
     head_user VARCHAR(255),

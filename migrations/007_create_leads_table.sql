@@ -1,4 +1,4 @@
--- Create leads table for storing customer/lead information
+-- Create leads table for storing customer/lead information (PostgreSQL)
 CREATE TABLE IF NOT EXISTS leads (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -21,25 +21,26 @@ CREATE TABLE IF NOT EXISTS leads (
 );
 
 -- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
-CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email);
-CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
-CREATE INDEX IF NOT EXISTS idx_leads_state ON leads(state);
-CREATE INDEX IF NOT EXISTS idx_leads_product_type ON leads(product_type);
-CREATE INDEX IF NOT EXISTS idx_leads_connected_status ON leads(connected_status);
-CREATE INDEX IF NOT EXISTS idx_leads_final_status ON leads(final_status);
-CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at);
+DO $$ BEGIN
+  CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
+  CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(email);
+  CREATE INDEX IF NOT EXISTS idx_leads_created_by ON leads(created_by);
+  CREATE INDEX IF NOT EXISTS idx_leads_state ON leads(state);
+  CREATE INDEX IF NOT EXISTS idx_leads_product_type ON leads(product_type);
+  CREATE INDEX IF NOT EXISTS idx_leads_connected_status ON leads(connected_status);
+  CREATE INDEX IF NOT EXISTS idx_leads_final_status ON leads(final_status);
+  CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at);
+EXCEPTION WHEN others THEN NULL; END $$;
 
 -- Create trigger to automatically update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_leads_updated_at 
-    BEFORE UPDATE ON leads 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_leads_updated_at ON leads;
+CREATE TRIGGER update_leads_updated_at
+BEFORE UPDATE ON leads
+FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

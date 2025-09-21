@@ -1,5 +1,7 @@
 const Lead = require('../models/Lead');
+const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const { validationResult } = require('express-validator');
+const leadAssignmentService = require('../services/leadAssignmentService');
 
 class LeadController {
   // Create a new lead
@@ -14,19 +16,20 @@ class LeadController {
         });
       }
 
-      const leadData = {
-        ...req.body,
-        createdBy: req.user.email // Assuming user email is available in req.user
-      };
+      // For Sales Department Head UI, persist to department_head_leads table
+      const dhResult = await DepartmentHeadLead.createFromUi(req.body, req.user.email);
 
-      const result = await Lead.create(leadData);
+      // Ensure salesperson_leads is synced if assigned
+      if (dhResult && dhResult.id) {
+        await leadAssignmentService.syncSalespersonLead(dhResult.id);
+      }
       
       res.status(201).json({
         success: true,
         message: 'Lead created successfully',
         data: {
-          id: result.insertId,
-          ...leadData
+          id: (dhResult && dhResult.id) || undefined,
+          ...req.body
         }
       });
     } catch (error) {
@@ -64,8 +67,8 @@ class LeadController {
         offset: (parseInt(page) - 1) * parseInt(limit)
       };
 
-      const leads = await Lead.getAll(filters, pagination);
-      const stats = await Lead.getStats(req.user.email);
+      const leads = await DepartmentHeadLead.getAll(filters, pagination);
+      const stats = await DepartmentHeadLead.getStats(req.user.email);
 
       res.json({
         success: true,
@@ -91,7 +94,7 @@ class LeadController {
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const lead = await Lead.getById(id);
+      const lead = await DepartmentHeadLead.getById(id);
 
       if (!lead) {
         return res.status(404).json({
@@ -129,16 +132,19 @@ class LeadController {
       const { id } = req.params;
       const updateData = req.body;
 
-      const result = await Lead.update(id, updateData);
+      const result = await DepartmentHeadLead.updateById(id, updateData);
 
-      if (result.affectedRows === 0) {
+      if (!result || result.rowCount === 0) {
         return res.status(404).json({
           success: false,
           message: 'Lead not found'
         });
       }
 
-      const updatedLead = await Lead.getById(id);
+      const updatedLead = await DepartmentHeadLead.getById(id);
+
+      // Sync salesperson lead if assignment changed or exists
+      await leadAssignmentService.syncSalespersonLead(id);
 
       res.json({
         success: true,
@@ -161,7 +167,7 @@ class LeadController {
       const { id } = req.params;
       const result = await Lead.delete(id);
 
-      if (result.affectedRows === 0) {
+      if (!result || result.rowCount === 0) {
         return res.status(404).json({
           success: false,
           message: 'Lead not found'
@@ -207,23 +213,21 @@ class LeadController {
         });
       }
 
-      const leadsData = req.body.leads.map(lead => ({
-        ...lead,
-        createdBy: req.user ? req.user.email : 'unknown@example.com'
-      }));
-
-      console.log('Processed leads data:', leadsData);
-
-      const result = await Lead.bulkCreate(leadsData);
+      // Import into department_head_leads for DH workflow
+      const result = await DepartmentHeadLead.bulkCreateFromUi(req.body.leads, req.user.email);
       console.log('Database insert result:', result);
+
+      // Sync salesperson leads for all inserted rows, if any assignments exist
+      if (result && result.rows && result.rows.length) {
+        for (const row of result.rows) {
+          await leadAssignmentService.syncSalespersonLead(row.id);
+        }
+      }
 
       res.status(201).json({
         success: true,
-        message: `Successfully imported ${leadsData.length} leads`,
-        data: {
-          importedCount: leadsData.length,
-          insertId: result.insertId
-        }
+        message: `Successfully imported ${req.body.leads.length} leads`,
+        data: { importedCount: req.body.leads.length }
       });
     } catch (error) {
       console.error('Error importing CSV:', error);
@@ -255,7 +259,7 @@ class LeadController {
 
       const result = await Lead.transferLead(id, transferredTo, transferredFrom, reason);
 
-      if (result.affectedRows === 0) {
+      if (!result || result.rowCount === 0) {
         return res.status(404).json({
           success: false,
           message: 'Lead not found'

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
-const AdminDepartmentUser = require('../models/AdminDepartmentUser');
 const SuperAdmin = require('../models/SuperAdmin');
+const DepartmentHead = require('../models/DepartmentHead');
+const DepartmentUser = require('../models/DepartmentUser');
 const logger = require('../utils/logger');
 
 // Protect routes - verify JWT token
@@ -28,22 +29,30 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ success: false, error: 'User not found' });
       }
       req.user = { id: su.id, email: su.email, username: su.username, role: 'superadmin' };
-    } else {
-      const user = await AdminDepartmentUser.findById(decoded.id);
-      if (!user) {
-        return res.status(401).json({ success: false, error: 'User not found' });
-      }
-      if (!user.is_active) {
-        return res.status(401).json({ success: false, error: 'User account is deactivated' });
-      }
+    } else if (decoded.type === 'department_head') {
+      const user = await DepartmentHead.findById(decoded.id);
+      if (!user) return res.status(401).json({ success: false, error: 'User not found' });
+      if (user.is_active === false) return res.status(401).json({ success: false, error: 'User account is deactivated' });
       req.user = {
         id: user.id,
         email: user.email,
         username: user.username,
-        role: user.role,
+        role: 'department_head',
         departmentType: user.department_type,
         companyName: user.company_name,
-        headUser: user.head_user
+      };
+    } else if (decoded.type === 'department_user') {
+      const user = await DepartmentUser.findById(decoded.id);
+      if (!user) return res.status(401).json({ success: false, error: 'User not found' });
+      if (user.is_active === false) return res.status(401).json({ success: false, error: 'User account is deactivated' });
+      req.user = {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        role: 'department_user',
+        departmentType: user.department_type,
+        companyName: user.company_name,
+        headUserId: user.head_user_id,
       };
     }
     next();

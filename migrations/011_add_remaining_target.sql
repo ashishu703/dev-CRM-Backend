@@ -1,0 +1,1 @@
+-- No-op: remaining_target will be derived as target - achieved_target when needed.

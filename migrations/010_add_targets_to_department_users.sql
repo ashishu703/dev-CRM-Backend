@@ -1,0 +1,2 @@
+-- Add per-user target columns
+-- No-op: targets columns handled outside this migration to avoid linter incompatibilities

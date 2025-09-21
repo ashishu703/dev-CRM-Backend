@@ -23,7 +23,7 @@
         },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"username\": \"john.doe\",\n  \"email\": \"john@example.com\",\n  \"password\": \"Password@123\",\n  \"departmentType\": \"telesales\",\n  \"companyName\": \"Anode Electric Pvt. Ltd.\",\n  \"role\": \"department_user\",\n  \"headUser\": \"head@example.com\"\n}"
+          "raw": "{\n  \"username\": \"john.doe\",\n  \"email\": \"john@example.com\",\n  \"password\": \"Password@123\",\n  \"departmentType\": \"office_sales\",\n  \"companyName\": \"Anode Electric Pvt. Ltd.\",\n  \"role\": \"department_user\",\n  \"headUser\": \"head@example.com\"\n}"
         }
       }
     },
