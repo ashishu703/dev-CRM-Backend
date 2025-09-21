@@ -12,6 +12,7 @@ const {
   idParamSchema
 } = require('../apis/leads/validators');
 const SalespersonLeadController = require('../controllers/salespersonLeadController');
+const upload = require('../middleware/upload');
 
 router.use(protect);
 
@@ -29,5 +30,20 @@ router.post('/import', mapLeadArray, validateRequest(importCSVSchema), LeadContr
 // Salesperson assigned leads for logged-in department_user or by username
 router.get('/assigned/salesperson', SalespersonLeadController.listForLoggedInUser);
 router.get('/assigned/salesperson/:username', SalespersonLeadController.listForUsername);
+
+// Salesperson lead details and updates (including file uploads)
+router.get('/assigned/salesperson/lead/:id', validateRequest(idParamSchema, 'params'), SalespersonLeadController.getById);
+router.put(
+  '/assigned/salesperson/lead/:id',
+  validateRequest(idParamSchema, 'params'),
+  upload.fields([
+    { name: 'quotation', maxCount: 1 },
+    { name: 'proforma_invoice', maxCount: 1 },
+    { name: 'payment_receipt', maxCount: 1 },
+    { name: 'call_recording', maxCount: 1 }
+  ]),
+  validateRequest(require('../apis/leads/validators').salespersonLeadUpdateSchema),
+  SalespersonLeadController.updateById
+);
 
 module.exports = router;

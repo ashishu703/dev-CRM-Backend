@@ -97,6 +97,63 @@ class SalespersonLead extends BaseModel {
     const result = await SalespersonLead.query(query, [username]);
     return result.rows || [];
   }
+
+  async getById(id) {
+    const result = await SalespersonLead.query('SELECT * FROM salesperson_leads WHERE id = $1', [id]);
+    return result.rows && result.rows[0] ? result.rows[0] : null;
+  }
+
+  async updateById(id, update) {
+    const fields = [];
+    const values = [];
+    let i = 1;
+
+    const allowed = [
+      'name',
+      'phone',
+      'email',
+      'business',
+      'address',
+      'gst_no',
+      'product_type',
+      'state',
+      'lead_source',
+      'customer_type',
+      'date',
+      'whatsapp',
+      'connected_status',
+      'connected_status_remark',
+      'final_status',
+      'final_status_remark',
+      'quotation_url',
+      'quotation_count',
+      'proforma_invoice_url',
+      'payment_status',
+      'payment_mode',
+      'payment_receipt_url',
+      'transferred_to',
+      'call_duration_seconds',
+      'call_recording_url',
+      'quotation_verified_status',
+      'quotation_verified_by',
+      'pi_verification_status',
+      'pi_verified_by'
+    ];
+
+    for (const key of allowed) {
+      if (Object.prototype.hasOwnProperty.call(update, key)) {
+        fields.push(`${key} = $${i++}`);
+        values.push(update[key]);
+      }
+    }
+
+    if (fields.length === 0) return { rowCount: 0 };
+    values.push(id);
+
+    const sql = `UPDATE salesperson_leads SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${i} RETURNING *`;
+    const result = await SalespersonLead.query(sql, values);
+    return { rowCount: result.rowCount, row: result.rows && result.rows[0] };
+  }
 }
 
 module.exports = new SalespersonLead();
