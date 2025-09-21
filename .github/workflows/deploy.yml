@@ -21,9 +21,11 @@ jobs:
 
       - name: Deploy on VPS
         run: |
-          ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} '
-            cd /var/www/myapp && \
-            git fetch origin master && \
-            git reset --hard origin/master && \
-            docker compose down && \
+          ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} << 'EOF'
+            set -e
+            cd /var/www/myapp
+            git fetch origin master
+            git reset --hard origin/master
+            docker compose down
             docker compose up -d --build
+          EOF
