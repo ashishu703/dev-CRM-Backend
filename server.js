@@ -7,6 +7,7 @@ require('dotenv').config();
 
 const logger = require('./utils/logger');
 const errorHandler = require('./middleware/errorHandler');
+const db = require('./config/database');
 const authRoutes = require('./routes/auth');
 const reviewRoutes = require('./routes/reviews');
 const adminRoutes = require('./routes/admin');
@@ -61,6 +62,18 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
+});
+
+// Database health check
+app.get('/health/db', async (req, res) => {
+  try {
+    const start = Date.now();
+    await db.query('SELECT 1');
+    const ms = Date.now() - start;
+    res.status(200).json({ status: 'OK', latencyMs: ms });
+  } catch (err) {
+    res.status(503).json({ status: 'DOWN', error: err?.message || 'Unknown error' });
+  }
 });
 
 // API routes
