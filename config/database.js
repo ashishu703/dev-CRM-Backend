@@ -23,8 +23,12 @@ const baseConfig = useConnectionString
 const pool = new Pool({
   ...baseConfig,
   max: 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
+  idleTimeoutMillis: 60000, // keep clients around a bit longer
+  connectionTimeoutMillis: 20000, // allow more time to establish remote TLS connections
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS) || 60000,
+  query_timeout: Number(process.env.DB_QUERY_TIMEOUT_MS) || 60000
 });
 
 // Test the connection
@@ -33,21 +37,54 @@ pool.on('connect', () => {
 });
 
 pool.on('error', (err) => {
+  // Do NOT crash the process on idle client errors. These can happen due to
+  // transient network issues (e.g., EADDRNOTAVAIL during read). Log them and
+  // allow the pool to recover.
   logger.error('Unexpected error on idle client', err);
-  process.exit(-1);
+  if (err && err.code === 'EADDRNOTAVAIL') {
+    // Network address not available: often transient. Let pg reconnect.
+    return;
+  }
+  // For other errors, still avoid exiting; rely on pg-pool to manage clients.
 });
 
 // Helper function to run queries
+const isTransientDbError = (err) => {
+  if (!err) return false;
+  const code = err.code || '';
+  const msg = String(err.message || '').toLowerCase();
+  return (
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === 'EADDRNOTAVAIL' ||
+    msg.includes('connection terminated due to connection timeout') ||
+    msg.includes('terminating connection due to administrator command')
+  );
+};
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const query = async (text, params) => {
+  const maxRetries = 3;
   const start = Date.now();
-  try {
-    const res = await pool.query(text, params);
-    const duration = Date.now() - start;
-    logger.debug('Executed query', { text, duration, rows: res.rowCount });
-    return res;
-  } catch (error) {
-    logger.error('Database query error', { text, error: error.message });
-    throw error;
+  let attempt = 0;
+  while (true) {
+    try {
+      const res = await pool.query(text, params);
+      const duration = Date.now() - start;
+      logger.debug('Executed query', { text, duration, rows: res.rowCount });
+      return res;
+    } catch (error) {
+      attempt += 1;
+      const transient = isTransientDbError(error);
+      logger.error('Database query error', { text, error: error.message, attempt, transient });
+      if (!transient || attempt >= maxRetries) {
+        throw error;
+      }
+      const backoff = 300 * attempt;
+      await delay(backoff);
+      // retry
+    }
   }
 };
 
