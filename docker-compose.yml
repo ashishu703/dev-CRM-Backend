@@ -9,6 +9,8 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4500
+      # --- THIS IS THE CRITICAL FIX ---
+      - ALLOWED_ORIGINS=http://62.72.12.249:8080
     env_file:
       - .env
     volumes:
@@ -24,26 +26,10 @@ services:
     networks:
       - anocab-network
 
-  # PostgreSQL Database (optional - if you want to run DB in container)
-  # Uncomment if you want to use containerized database
-  # postgres:
-  #   image: postgres:15-alpine
-  #   container_name: anocab-postgres
-  #   environment:
-  #     POSTGRES_DB: ${DB_NAME}
-  #     POSTGRES_USER: ${DB_USER}
-  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   ports:
-  #     - "5432:5432"
-  #   restart: unless-stopped
-  #   networks:
-  #     - anocab-network
-
 networks:
   anocab-network:
     driver: bridge
 
+# Optional volumes section if you use a containerized database in the future
 # volumes:
 #   postgres_data:
