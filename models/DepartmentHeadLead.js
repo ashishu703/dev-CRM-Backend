@@ -11,7 +11,7 @@ class DepartmentHeadLead extends BaseModel {
         customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        connected_status, final_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NOW(),NOW())
       RETURNING id
@@ -35,8 +35,7 @@ class DepartmentHeadLead extends BaseModel {
       uiLead.state || null,
       uiLead.customerType || null,
       uiLead.date || null,
-      uiLead.connectedStatus || 'pending',
-      uiLead.finalStatus || 'open',
+      uiLead.salesStatus || 'pending',
       uiLead.whatsapp || null,
       uiLead.assignedSalesperson || null,
       uiLead.assignedTelecaller || null,
@@ -59,7 +58,7 @@ class DepartmentHeadLead extends BaseModel {
         customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        connected_status, final_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       ) VALUES ${placeholders}
       RETURNING id
@@ -83,8 +82,7 @@ class DepartmentHeadLead extends BaseModel {
       r.state || null,
       r.customerType || null,
       r.date || null,
-      r.connectedStatus || 'pending',
-      r.finalStatus || 'open',
+      r.salesStatus || 'pending',
       r.whatsapp || null,
       r.assignedSalesperson || null,
       r.assignedTelecaller || null,
@@ -100,7 +98,7 @@ class DepartmentHeadLead extends BaseModel {
         id, customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        connected_status, final_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       FROM department_head_leads
     `;
@@ -128,9 +126,9 @@ class DepartmentHeadLead extends BaseModel {
       paramCount++;
     }
 
-    if (filters.connectedStatus) {
-      conditions.push(`connected_status = $${paramCount}`);
-      values.push(filters.connectedStatus);
+    if (filters.salesStatus) {
+      conditions.push(`sales_status = $${paramCount}`);
+      values.push(filters.salesStatus);
       paramCount++;
     }
 
@@ -171,7 +169,7 @@ class DepartmentHeadLead extends BaseModel {
         id, customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        connected_status, final_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       FROM department_head_leads
       WHERE id = $1
@@ -185,7 +183,7 @@ class DepartmentHeadLead extends BaseModel {
       'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
       'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
       'phone', 'address', 'gstNo', 'state', 'customerType', 'date',
-      'connectedStatus', 'finalStatus', 'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
+      'salesStatus', 'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
     ];
 
     const fieldMap = {
@@ -196,8 +194,6 @@ class DepartmentHeadLead extends BaseModel {
       paymentStatus: 'payment_status',
       gstNo: 'gst_no',
       customerType: 'customer_type',
-      connectedStatus: 'connected_status',
-      finalStatus: 'final_status',
       assignedSalesperson: 'assigned_salesperson',
       assignedTelecaller: 'assigned_telecaller'
     };

@@ -37,8 +37,7 @@ class LeadAssignmentService {
       lead_source: dhLead.lead_source || null,
       customer_type: dhLead.customer_type || null,
       date: dhLead.date || null,
-      connected_status: dhLead.connected_status || null,
-      final_status: dhLead.final_status || null,
+      sales_status: dhLead.sales_status || null,
       whatsapp: dhLead.whatsapp || null,
       created_by: dhLead.created_by,
     };

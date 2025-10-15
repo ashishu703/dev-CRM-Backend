@@ -39,8 +39,7 @@ router.put(
   upload.fields([
     { name: 'quotation', maxCount: 1 },
     { name: 'proforma_invoice', maxCount: 1 },
-    { name: 'payment_receipt', maxCount: 1 },
-    { name: 'call_recording', maxCount: 1 }
+    { name: 'payment_receipt', maxCount: 1 }
   ]),
   validateRequest(require('../apis/leads/validators').salespersonLeadUpdateSchema),
   SalespersonLeadController.updateById

@@ -49,13 +49,6 @@ class SalespersonLeadController {
 
       const updatePayload = { ...req.body };
 
-      // Clean up empty strings for integer fields - convert to null
-      if (updatePayload.call_duration_seconds === '' || updatePayload.call_duration_seconds === undefined) {
-        updatePayload.call_duration_seconds = null;
-      } else {
-        updatePayload.call_duration_seconds = parseInt(updatePayload.call_duration_seconds);
-      }
-      
       if (updatePayload.quotation_count === '' || updatePayload.quotation_count === undefined) {
         updatePayload.quotation_count = null;
       } else {
@@ -90,15 +83,7 @@ class SalespersonLeadController {
           });
           updatePayload.payment_receipt_url = url;
         }
-        if (req.files.call_recording?.[0]) {
-          const file = req.files.call_recording[0];
-          const url = await storageService.uploadBuffer(file.buffer, {
-            folder: `salesperson_leads/${id}/call_recording`,
-            filename: `${Date.now()}_${file.originalname}`,
-            mimeType: file.mimetype,
-          });
-          updatePayload.call_recording_url = url;
-        }
+        
       }
 
       const result = await SalespersonLead.updateById(id, updatePayload);
@@ -117,8 +102,7 @@ class SalespersonLeadController {
         if (updatePayload.lead_source !== undefined) dhUpdate.leadSource = updatePayload.lead_source;
         if (updatePayload.customer_type !== undefined) dhUpdate.customerType = updatePayload.customer_type;
         if (updatePayload.date !== undefined) dhUpdate.date = updatePayload.date;
-        if (updatePayload.connected_status !== undefined) dhUpdate.connectedStatus = updatePayload.connected_status;
-        if (updatePayload.final_status !== undefined) dhUpdate.finalStatus = updatePayload.final_status;
+        if (updatePayload.sales_status !== undefined) dhUpdate.salesStatus = updatePayload.sales_status;
         if (updatePayload.whatsapp !== undefined) dhUpdate.whatsapp = updatePayload.whatsapp;
 
         await DepartmentHeadLead.updateById(id, dhUpdate);
