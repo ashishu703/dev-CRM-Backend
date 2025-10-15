@@ -19,8 +19,7 @@ class Lead extends BaseModel {
       leadSource,
       customerType,
       date,
-      connectedStatus,
-      finalStatus,
+      salesStatus,
       whatsapp,
       createdBy,
       transferredFrom,
@@ -31,16 +30,16 @@ class Lead extends BaseModel {
     const query = `
       INSERT INTO leads (
         name, phone, email, business, address, gst_no, product_type, 
-        state, lead_source, customer_type, date, connected_status, 
-        final_status, whatsapp, created_by, transferred_from, transferred_to, 
+        state, lead_source, customer_type, date, sales_status, 
+        whatsapp, created_by, transferred_from, transferred_to, 
         transferred_at, transfer_reason, created_at, updated_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
     `;
 
     const values = [
       name, phone, email, business, address, gstNo, productType,
-      state, leadSource, customerType, date, connectedStatus,
-      finalStatus, whatsapp, createdBy, transferredFrom, transferredTo,
+      state, leadSource, customerType, date, salesStatus,
+      whatsapp, createdBy, transferredFrom, transferredTo,
       transferredFrom ? new Date() : null, transferReason
     ];
 
@@ -65,8 +64,8 @@ class Lead extends BaseModel {
     const query = `
       INSERT INTO leads (
         name, phone, email, business, address, gst_no, product_type, 
-        state, lead_source, customer_type, date, connected_status, 
-        final_status, whatsapp, created_by, transferred_from, transferred_to, 
+        state, lead_source, customer_type, date, sales_status, 
+        whatsapp, created_by, transferred_from, transferred_to, 
         transferred_at, transfer_reason, created_at, updated_at
       ) VALUES ${placeholders}
     `;
@@ -83,8 +82,7 @@ class Lead extends BaseModel {
       lead.leadSource,
       lead.customerType,
       lead.date,
-      lead.connectedStatus,
-      lead.finalStatus,
+      lead.salesStatus,
       lead.whatsapp,
       lead.createdBy,
       lead.transferredFrom || null,
@@ -112,8 +110,8 @@ class Lead extends BaseModel {
       SELECT 
         id, name, phone, email, business, address, gst_no as gstNo,
         product_type as productType, state, lead_source as leadSource,
-        customer_type as customerType, date, connected_status as connectedStatus,
-        final_status as finalStatus, whatsapp, created_by as createdBy,
+        customer_type as customerType, date, sales_status as salesStatus,
+        whatsapp, created_by as createdBy,
         transferred_from as transferredFrom, transferred_to as transferredTo,
         transferred_at as transferredAt, transfer_reason as transferReason,
         created_at as createdAt, updated_at as updatedAt
@@ -144,9 +142,9 @@ class Lead extends BaseModel {
       paramCount += 1;
     }
 
-    if (filters.connectedStatus) {
-      query += ` AND connected_status = $${paramCount}`;
-      values.push(filters.connectedStatus);
+    if (filters.salesStatus) {
+      query += ` AND sales_status = $${paramCount}`;
+      values.push(filters.salesStatus);
       paramCount += 1;
     }
 
@@ -181,8 +179,8 @@ class Lead extends BaseModel {
       SELECT 
         id, name, phone, email, business, address, gst_no as gstNo,
         product_type as productType, state, lead_source as leadSource,
-        customer_type as customerType, date, connected_status as connectedStatus,
-        final_status as finalStatus, whatsapp, created_by as createdBy,
+        customer_type as customerType, date, sales_status as salesStatus,
+        whatsapp, created_by as createdBy,
         transferred_from as transferredFrom, transferred_to as transferredTo,
         transferred_at as transferredAt, transfer_reason as transferReason,
         created_at as createdAt, updated_at as updatedAt
@@ -198,8 +196,8 @@ class Lead extends BaseModel {
   async update(id, updateData) {
     const allowedFields = [
       'name', 'phone', 'email', 'business', 'address', 'gstNo', 'productType',
-      'state', 'leadSource', 'customerType', 'date', 'connectedStatus',
-      'finalStatus', 'whatsapp'
+      'state', 'leadSource', 'customerType', 'date', 'salesStatus',
+      'whatsapp'
     ];
 
     const updateFields = [];
@@ -212,8 +210,7 @@ class Lead extends BaseModel {
                        key === 'productType' ? 'product_type' :
                        key === 'leadSource' ? 'lead_source' :
                        key === 'customerType' ? 'customer_type' :
-                       key === 'connectedStatus' ? 'connected_status' :
-                       key === 'finalStatus' ? 'final_status' :
+                       key === 'salesStatus' ? 'sales_status' :
                        key;
         
         updateFields.push(`${dbField} = $${paramCount++}`);
@@ -265,10 +262,10 @@ class Lead extends BaseModel {
     let query = `
       SELECT 
         COUNT(*) as total,
-        COUNT(CASE WHEN connected_status = 'connected' THEN 1 END) as connected,
-        COUNT(CASE WHEN connected_status = 'not_connected' THEN 1 END) as notConnected,
-        COUNT(CASE WHEN connected_status = 'pending' THEN 1 END) as pending,
-        COUNT(CASE WHEN final_status = 'closed' THEN 1 END) as closed
+        COUNT(CASE WHEN sales_status = 'connected' THEN 1 END) as connected,
+        COUNT(CASE WHEN sales_status = 'not_connected' THEN 1 END) as notConnected,
+        COUNT(CASE WHEN sales_status = 'pending' THEN 1 END) as pending,
+        COUNT(CASE WHEN sales_status = 'closed' THEN 1 END) as closed
       FROM leads
     `;
 
