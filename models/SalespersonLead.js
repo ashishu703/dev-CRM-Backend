@@ -23,8 +23,7 @@ class SalespersonLead extends BaseModel {
       lead_source,
       customer_type,
       date,
-      connected_status,
-      final_status,
+      sales_status,
       whatsapp,
       created_by,
     } = payload;
@@ -32,12 +31,12 @@ class SalespersonLead extends BaseModel {
     const query = `
       INSERT INTO salesperson_leads (
         id, dh_lead_id, name, phone, email, business, address, gst_no, product_type,
-        state, lead_source, customer_type, date, connected_status, final_status, whatsapp,
+        state, lead_source, customer_type, date, sales_status, whatsapp,
         created_by, created_at, updated_at
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,
         $10,$11,$12,$13,$14,$15,$16,
-        $17, NOW(), NOW()
+        NOW(), NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
         dh_lead_id = EXCLUDED.dh_lead_id,
@@ -52,8 +51,7 @@ class SalespersonLead extends BaseModel {
         lead_source = EXCLUDED.lead_source,
         customer_type = EXCLUDED.customer_type,
         date = EXCLUDED.date,
-        connected_status = EXCLUDED.connected_status,
-        final_status = EXCLUDED.final_status,
+        sales_status = EXCLUDED.sales_status,
         whatsapp = EXCLUDED.whatsapp,
         updated_at = NOW()
     `;
@@ -72,8 +70,7 @@ class SalespersonLead extends BaseModel {
       lead_source,
       customer_type,
       date,
-      connected_status,
-      final_status,
+      sales_status,
       whatsapp,
       created_by,
     ];
@@ -121,10 +118,8 @@ class SalespersonLead extends BaseModel {
       'customer_type',
       'date',
       'whatsapp',
-      'connected_status',
-      'connected_status_remark',
-      'final_status',
-      'final_status_remark',
+      'sales_status',
+      'sales_status_remark',
       'quotation_url',
       'quotation_count',
       'proforma_invoice_url',
@@ -132,8 +127,6 @@ class SalespersonLead extends BaseModel {
       'payment_mode',
       'payment_receipt_url',
       'transferred_to',
-      'call_duration_seconds',
-      'call_recording_url',
       'quotation_verified_status',
       'quotation_verified_by',
       'pi_verification_status',

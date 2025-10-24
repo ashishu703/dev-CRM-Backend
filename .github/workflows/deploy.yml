@@ -21,7 +21,7 @@ jobs:
 
       - name: Deploy on VPS
         run: |
-          ssh -i ~/.ssh/id_rsa root@${{ secrets.SERVER_IP }} << 'EOF'
+          ssh -i ~/.ssh/id_rsa --tt root@${{ secrets.SERVER_IP }} << 'EOF'
             set -e
             cd /var/www/myapp
             git fetch origin master
