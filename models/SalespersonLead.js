@@ -60,7 +60,7 @@ class SalespersonLead extends BaseModel {
       id,
       dh_lead_id,
       name,
-      phone,
+      phone || '0000000000', // Provide default phone if null
       email,
       business,
       address,
