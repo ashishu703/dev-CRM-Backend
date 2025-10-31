@@ -60,7 +60,7 @@ class SalespersonLead extends BaseModel {
       id,
       dh_lead_id,
       name,
-      phone || '0000000000', // Provide default phone if null
+      phone,
       email,
       business,
       address,
@@ -78,20 +78,13 @@ class SalespersonLead extends BaseModel {
     return await SalespersonLead.query(query, values);
   }
 
-  async listForUser(username) {
+  async listForUser(_username) {
+    // Return all rows present in salesperson_leads; DH assignment may change over time
     const query = `
       SELECT * FROM salesperson_leads
-      WHERE 1=1
-        AND (
-          EXISTS (
-            SELECT 1 FROM department_head_leads dhl
-            WHERE dhl.id = salesperson_leads.dh_lead_id
-              AND (dhl.assigned_salesperson = $1 OR dhl.assigned_telecaller = $1)
-          )
-        )
       ORDER BY updated_at DESC
     `;
-    const result = await SalespersonLead.query(query, [username]);
+    const result = await SalespersonLead.query(query, []);
     return result.rows || [];
   }
 

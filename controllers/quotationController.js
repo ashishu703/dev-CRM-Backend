@@ -423,6 +423,81 @@ class QuotationController {
       res.status(500).json({ success: false, message: 'Failed to get summary', error: error.message });
     }
   }
+
+  // Bulk fetch quotations with payments for salesperson's customers
+  async getBulkWithPayments(req, res) {
+    try {
+      const salespersonId = req.user.id;
+      
+      // Fetch all approved quotations for salesperson's customers in one query
+      const quotationsQuery = `
+        SELECT 
+          q.*
+        FROM quotations q
+        WHERE q.salesperson_id = $1 
+          AND q.status = 'approved'
+        ORDER BY q.created_at DESC
+      `;
+      
+      const quotationsResult = await query(quotationsQuery, [salespersonId]);
+      const quotations = quotationsResult.rows || [];
+      
+      if (quotations.length === 0) {
+        return res.json({
+          success: true,
+          data: { quotations: [], payments: [] }
+        });
+      }
+      
+      // Get all quotation IDs
+      const quotationIds = quotations.map(q => q.id);
+      
+      // Fetch all payments for these quotations in one query
+      const paymentsQuery = `
+        SELECT 
+          ph.*
+        FROM payment_history ph
+        WHERE ph.quotation_id = ANY($1::uuid[])
+        ORDER BY ph.payment_date DESC, ph.created_at DESC
+      `;
+      
+      const paymentsResult = await query(paymentsQuery, [quotationIds]);
+      const payments = paymentsResult.rows || [];
+      
+      // Calculate payment summaries for each quotation
+      const quotationsWithSummary = quotations.map(q => {
+        const quotationPayments = payments.filter(p => p.quotation_id === q.id);
+        const totalAmount = Number(q.total_amount || 0);
+        const paidAmount = quotationPayments
+          .filter(p => p.payment_status === 'completed' && !p.is_refund)
+          .reduce((sum, p) => sum + Number(p.installment_amount || 0), 0);
+        const remainingAmount = Math.max(0, totalAmount - paidAmount);
+        
+        return {
+          ...q,
+          total_amount: totalAmount,
+          paid_amount: paidAmount,
+          remaining_amount: remainingAmount,
+          payment_count: quotationPayments.length
+        };
+      });
+      
+      res.json({
+        success: true,
+        data: {
+          quotations: quotationsWithSummary,
+          payments: payments
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching bulk quotations with payments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch quotations with payments',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new QuotationController();

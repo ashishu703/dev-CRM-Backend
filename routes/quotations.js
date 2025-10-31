@@ -8,6 +8,7 @@ router.use(protect);
 
 // Specific routes must come before parameterized ':id' routes
 router.get('/approved', quotationController.getApprovedForCustomer);
+router.get('/bulk-with-payments', quotationController.getBulkWithPayments);
 router.get('/:id/summary', quotationController.getSummary);
 
 // Quotation CRUD routes

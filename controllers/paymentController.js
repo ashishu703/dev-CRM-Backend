@@ -1,6 +1,6 @@
 const Payment = require('../models/Payment');
 const CustomerCredit = require('../models/CustomerCredit');
-const { getClient } = require('../config/database');
+const { getClient, query } = require('../config/database');
 
 class PaymentController {
   /**
@@ -15,6 +15,7 @@ class PaymentController {
       const {
         lead_id,
         quotation_id,
+        pi_id,
         installment_amount,
         payment_method,
         payment_date,
@@ -192,7 +193,7 @@ class PaymentController {
         lead.business || lead.business_type,
         lead.address,
         quotation_id || null,
-        null, // pi_id
+        pi_id || null,
         quotationTotal,
         totalPaidAfter,
         remainingAfter,
@@ -434,7 +435,7 @@ class PaymentController {
 
       // Get total count
       const countQuery = `SELECT COUNT(*) FROM payment_history ${whereClause}`;
-      const countResult = await Payment.query(countQuery, values);
+      const countResult = await query(countQuery, values);
       const totalCount = parseInt(countResult.rows[0].count);
 
       // Get payments with pagination
@@ -443,21 +444,26 @@ class PaymentController {
       paramCount++;
       const offsetParam = `$${paramCount}`;
       
-      const query = `
+      const paymentsQuery = `
         SELECT 
           ph.*,
-          l.customer as lead_customer_name,
+          l.name as lead_customer_name,
           l.email as lead_email,
-          l.phone as lead_phone
+          l.phone as lead_phone,
+          q.quotation_number,
+          pi.pi_number,
+          pi.id as pi_full_id
         FROM payment_history ph
         LEFT JOIN leads l ON ph.lead_id = l.id
+        LEFT JOIN quotations q ON ph.quotation_id = q.id
+        LEFT JOIN proforma_invoices pi ON ph.pi_id = pi.id
         ${whereClause}
         ORDER BY ph.payment_date DESC, ph.created_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}
       `;
       
       values.push(parseInt(limit), offset);
-      const result = await Payment.query(query, values);
+      const result = await query(paymentsQuery, values);
 
       res.json({
         success: true,

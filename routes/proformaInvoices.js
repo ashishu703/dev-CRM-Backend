@@ -7,6 +7,8 @@ const { protect } = require('../middleware/auth');
 router.use(protect);
 
 // Proforma Invoice routes
+router.get('/all', proformaInvoiceController.getAll);
+router.get('/pending', proformaInvoiceController.getPendingApproval);
 router.post('/quotation/:quotationId', proformaInvoiceController.createFromQuotation);
 router.get('/:id', proformaInvoiceController.getById);
 router.get('/:id/payments', proformaInvoiceController.getWithPayments);

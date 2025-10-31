@@ -1,4 +1,5 @@
 const BaseModel = require('./BaseModel');
+const { getClient, query } = require('../config/database');
 
 class ProformaInvoice extends BaseModel {
   constructor() {
@@ -7,7 +8,7 @@ class ProformaInvoice extends BaseModel {
 
   // Create PI from quotation
   async createFromQuotation(quotationId, piData) {
-    const client = await this.getClient();
+    const client = await getClient();
     
     try {
       await client.query('BEGIN');
@@ -24,15 +25,18 @@ class ProformaInvoice extends BaseModel {
       // Generate PI number
       const piNumber = await this.generatePINumber();
       
-      // Create PI
+      // Create PI with dispatch details
       const piQuery = `
         INSERT INTO proforma_invoices (
           pi_number, quotation_id, customer_id, salesperson_id,
           pi_date, valid_until, status,
           subtotal, tax_amount, total_amount, remaining_balance,
+          dispatch_mode, transport_name, vehicle_number, transport_id, lr_no,
+          courier_name, consignment_no, by_hand, post_service,
+          carrier_name, carrier_number,
           created_by
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
         ) RETURNING *
       `;
       
@@ -48,6 +52,17 @@ class ProformaInvoice extends BaseModel {
         quotation.tax_amount,
         quotation.total_amount,
         quotation.total_amount, // remaining_balance = total_amount initially
+        piData.dispatch_mode || piData.dispatchMode || null,
+        piData.transport_name || piData.transportName || null,
+        piData.vehicle_number || piData.vehicleNumber || null,
+        piData.transport_id || piData.transportId || null,
+        piData.lr_no || piData.lrNo || null,
+        piData.courier_name || piData.courierName || null,
+        piData.consignment_no || piData.consignmentNo || null,
+        piData.by_hand || piData.byHand || null,
+        piData.post_service || piData.postService || null,
+        piData.carrier_name || piData.carrierName || null,
+        piData.carrier_number || piData.carrierNumber || null,
         piData.createdBy
       ];
       
@@ -65,9 +80,58 @@ class ProformaInvoice extends BaseModel {
     }
   }
 
+  // Update PI by ID
+  async updateById(id, updateData) {
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    // Dynamic field updates
+    const fieldMap = {
+      dispatch_mode: updateData.dispatch_mode || updateData.dispatchMode,
+      transport_name: updateData.transport_name || updateData.transportName,
+      vehicle_number: updateData.vehicle_number || updateData.vehicleNumber,
+      transport_id: updateData.transport_id || updateData.transportId,
+      lr_no: updateData.lr_no || updateData.lrNo,
+      courier_name: updateData.courier_name || updateData.courierName,
+      consignment_no: updateData.consignment_no || updateData.consignmentNo,
+      by_hand: updateData.by_hand || updateData.byHand,
+      post_service: updateData.post_service || updateData.postService,
+      carrier_name: updateData.carrier_name || updateData.carrierName,
+      carrier_number: updateData.carrier_number || updateData.carrierNumber,
+      status: updateData.status,
+      pi_date: updateData.pi_date || updateData.piDate,
+      valid_until: updateData.valid_until || updateData.validUntil
+    };
+
+    Object.entries(fieldMap).forEach(([key, value]) => {
+      if (value !== undefined) {
+        fields.push(`${key} = $${paramCount++}`);
+        values.push(value);
+      }
+    });
+
+    if (fields.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    fields.push(`updated_at = NOW()`);
+    values.push(id);
+
+    const sql = `
+      UPDATE proforma_invoices 
+      SET ${fields.join(', ')}
+      WHERE id = $${paramCount}
+      RETURNING *
+    `;
+
+    const result = await query(sql, values);
+    return result.rows[0];
+  }
+
   // Send PI to customer
   async sendToCustomer(id, sentBy) {
-    const query = `
+    const sql = `
       UPDATE proforma_invoices 
       SET status = 'sent', 
           sent_to_customer_at = NOW(),
@@ -76,12 +140,13 @@ class ProformaInvoice extends BaseModel {
       RETURNING *
     `;
     
-    return await this.query(query, [id]);
+    const result = await query(sql, [id]);
+    return result.rows[0];
   }
 
   // Customer accepts PI
   async acceptByCustomer(id, acceptedBy) {
-    const query = `
+    const sql = `
       UPDATE proforma_invoices 
       SET status = 'accepted', 
           customer_accepted_at = NOW(),
@@ -90,12 +155,13 @@ class ProformaInvoice extends BaseModel {
       RETURNING *
     `;
     
-    return await this.query(query, [id]);
+    const result = await query(sql, [id]);
+    return result.rows[0];
   }
 
   // Update payment totals
   async updatePaymentTotals(id) {
-    const query = `
+    const sql = `
       UPDATE proforma_invoices 
       SET total_paid = (
         SELECT COALESCE(SUM(amount), 0) 
@@ -112,12 +178,13 @@ class ProformaInvoice extends BaseModel {
       RETURNING *
     `;
     
-    return await this.query(query, [id]);
+    const result = await query(sql, [id]);
+    return result.rows[0];
   }
 
   // Get PIs by customer
   async getByCustomer(customerId) {
-    const query = `
+    const sql = `
       SELECT pi.*, 
              q.quotation_number,
              q.customer_name,
@@ -131,50 +198,108 @@ class ProformaInvoice extends BaseModel {
       ORDER BY pi.created_at DESC
     `;
     
-    return await this.query(query, [customerId]);
-  }
-
-  // Get PIs by quotation
-  async getByQuotation(quotationId) {
-    const query = `
-      SELECT pi.*, 
-             COUNT(ph.id) as payment_count,
-             COALESCE(SUM(ph.installment_amount), 0) as total_paid
-      FROM proforma_invoices pi
-      LEFT JOIN payment_history ph ON pi.quotation_id = ph.quotation_id AND ph.payment_status = 'completed' AND ph.is_refund = false
-      WHERE pi.quotation_id = $1
-      GROUP BY pi.id
-      ORDER BY pi.created_at DESC
-    `;
-    
-    return await this.query(query, [quotationId]);
+    const result = await query(sql, [customerId]);
+    return result.rows;
   }
 
   // Generate PI number
   async generatePINumber() {
-    const query = 'SELECT generate_pi_number() as pi_number';
-    const result = await this.query(query);
-    return result[0].pi_number;
+    const year = new Date().getFullYear();
+    const month = String(new Date().getMonth() + 1).padStart(2, '0');
+    
+    // Get the latest PI number for this year and month
+    const sql = `
+      SELECT pi_number 
+      FROM proforma_invoices 
+      WHERE pi_number LIKE $1 
+      ORDER BY created_at DESC 
+      LIMIT 1
+    `;
+    const prefix = `PI-${year}-${month}-%`;
+    const result = await query(sql, [prefix]);
+    
+    let sequence = 1;
+    if (result.rows.length > 0) {
+      // Extract sequence number from last PI number (format: PI-YYYY-MM-XXX)
+      const lastPiNumber = result.rows[0].pi_number;
+      const lastSequence = parseInt(lastPiNumber.split('-').pop());
+      sequence = lastSequence + 1;
+    }
+    
+    return `PI-${year}-${month}-${String(sequence).padStart(4, '0')}`;
   }
 
   // Get PI with payments
   async getWithPayments(id) {
-    const pi = await this.getById(id);
+    const sql = 'SELECT * FROM proforma_invoices WHERE id = $1';
+    const result = await query(sql, [id]);
+    const pi = result.rows[0];
     if (!pi) return null;
     
-    const payments = await this.query(
+    const paymentsResult = await query(
       `SELECT * FROM payment_history WHERE quotation_id = $1 AND payment_status = 'completed' AND is_refund = false ORDER BY payment_date ASC`,
       [pi.quotation_id]
     );
     
-    pi.payments = payments;
+    pi.payments = paymentsResult.rows;
     return pi;
   }
 
   // Get PIs by quotation
   async getByQuotation(quotationId) {
-    const query = 'SELECT * FROM proforma_invoices WHERE quotation_id = $1 ORDER BY created_at DESC';
-    return await this.query(query, [quotationId]);
+    const sql = 'SELECT * FROM proforma_invoices WHERE quotation_id = $1 ORDER BY created_at DESC';
+    const result = await query(sql, [quotationId]);
+    return result.rows;
+  }
+
+  // Get PI by ID
+  async getById(id) {
+    const sql = 'SELECT * FROM proforma_invoices WHERE id = $1';
+    const result = await query(sql, [id]);
+    return result.rows[0];
+  }
+
+  // Get all PIs (approved, rejected, pending)
+  async getAll() {
+    const sql = `
+      SELECT pi.*, 
+             dh.customer AS customer_name,
+             dh.business AS customer_business
+      FROM proforma_invoices pi
+      LEFT JOIN department_head_leads dh ON pi.customer_id = dh.id
+      ORDER BY 
+        CASE 
+          WHEN pi.status = 'pending_approval' THEN 1
+          WHEN pi.status = 'approved' THEN 2
+          WHEN pi.status = 'rejected' THEN 3
+          ELSE 4
+        END,
+        pi.created_at DESC
+    `;
+    const result = await query(sql);
+    return result.rows;
+  }
+
+  // Get all PIs pending approval
+  async getPendingApproval() {
+    const sql = `
+      SELECT pi.*, 
+             dh.customer AS customer_name,
+             dh.business AS customer_business
+      FROM proforma_invoices pi
+      LEFT JOIN department_head_leads dh ON pi.customer_id = dh.id
+      WHERE pi.status = 'pending_approval'
+      ORDER BY pi.created_at DESC
+    `;
+    const result = await query(sql);
+    return result.rows;
+  }
+
+  // Delete PI by ID
+  async deleteById(id) {
+    const sql = 'DELETE FROM proforma_invoices WHERE id = $1 RETURNING *';
+    const result = await query(sql, [id]);
+    return result.rows[0];
   }
 }
 

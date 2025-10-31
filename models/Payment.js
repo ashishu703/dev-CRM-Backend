@@ -40,10 +40,13 @@ class Payment extends BaseModel {
       SELECT ph.*, 
              q.quotation_number,
              q.total_amount as quotation_total,
-             l.name as lead_name
+             l.name as lead_name,
+             pi.pi_number,
+             pi.id as pi_full_id
       FROM payment_history ph
       LEFT JOIN quotations q ON ph.quotation_id = q.id
       LEFT JOIN leads l ON ph.lead_id = l.id
+      LEFT JOIN proforma_invoices pi ON ph.pi_id = pi.id
       WHERE ph.quotation_id = $1 AND ph.is_refund = false
       ORDER BY ph.payment_date ASC, ph.installment_number ASC
     `;

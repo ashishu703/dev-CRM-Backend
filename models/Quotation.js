@@ -410,32 +410,38 @@ class Quotation extends BaseModel {
     const quotation = await this.getWithItems(quotationId);
     if (!quotation) return null;
     
-    // Get approval logs
-    const approvalLogs = await query(
+    // Get approval logs (rows array)
+    const approvalLogsRes = await query(
       'SELECT * FROM quotation_approval_logs WHERE quotation_id = $1 ORDER BY created_at ASC',
       [quotationId]
     );
+    const approvalLogs = approvalLogsRes.rows || [];
     
-    // Get sent logs
-    const sentLogs = await query(
+    // Get sent logs (rows array)
+    const sentLogsRes = await query(
       'SELECT * FROM quotation_sent_logs WHERE quotation_id = $1 ORDER BY sent_at ASC',
       [quotationId]
     );
+    const sentLogs = sentLogsRes.rows || [];
     
-    // Get PIs
-    const pis = await query(
+    // Get PIs (rows array)
+    const pisRes = await query(
       'SELECT * FROM proforma_invoices WHERE quotation_id = $1 ORDER BY created_at ASC',
       [quotationId]
     );
+    const pis = pisRes.rows || [];
     
-    // Get payments for all PIs
-    const payments = [];
-    for (const pi of pis) {
-      const piPayments = await query(
-        'SELECT * FROM payments WHERE pi_id = $1 ORDER BY payment_date ASC',
-        [pi.id]
+    // Get payment history for this quotation (if payment_history table exists)
+    let payments = [];
+    try {
+      const paymentsRes = await query(
+        'SELECT * FROM payment_history WHERE quotation_id = $1 AND payment_status = $2 ORDER BY payment_date ASC',
+        [quotationId, 'completed']
       );
-      payments.push(...piPayments);
+      payments = paymentsRes.rows || [];
+    } catch (err) {
+      // payment_history table might not exist, ignore
+      console.log('payment_history table not found, skipping payments');
     }
     
     return {
