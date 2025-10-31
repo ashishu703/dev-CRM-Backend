@@ -18,5 +18,5 @@ ADD CONSTRAINT department_users_department_type_check
 CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr'));
 
 -- Add comment for clarity
-COMMENT ON CONSTRAINT department_heads_department_type_check ON department_heads IS 'Allows marketing_sales, office_sales, and hr department types';
-COMMENT ON CONSTRAINT department_users_department_type_check ON department_users IS 'Allows marketing_sales, office_sales, and hr department types';
+-- COMMENT ON CONSTRAINT department_heads_department_type_check ON department_heads IS 'Allows marketing_sales, office_sales, and hr department types';
+-- COMMENT ON CONSTRAINT department_users_department_type_check ON department_users IS 'Allows marketing_sales, office_sales, and hr department types';

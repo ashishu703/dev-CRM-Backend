@@ -27,7 +27,7 @@ class LeadAssignmentService {
       id: dhLead.id,
       dh_lead_id: dhLead.id,
       name: dhLead.customer || null,
-      phone: dhLead.phone || null,
+      phone: dhLead.phone || '0000000000', // Provide default phone if null
       email: dhLead.email || null,
       business: dhLead.business || null,
       address: dhLead.address || null,

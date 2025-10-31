@@ -8,7 +8,10 @@ const finalStatuses = ['open', 'closed', 'next_meeting', 'order_confirmed', 'not
 const createLeadSchema = [
   body('name')
     .optional()
-    .isLength({ min: 2, max: 255 })
+    .custom((value) => {
+      if (value === null || value === undefined || value === '') return true;
+      return value.length >= 2 && value.length <= 255;
+    })
     .withMessage('Name must be between 2 and 255 characters'),
   
   body('phone')
@@ -107,7 +110,10 @@ const createLeadSchema = [
 const updateLeadSchema = [
   body('name')
     .optional()
-    .isLength({ min: 2, max: 255 })
+    .custom((value) => {
+      if (value === null || value === undefined || value === '') return true;
+      return value.length >= 2 && value.length <= 255;
+    })
     .withMessage('Name must be between 2 and 255 characters'),
   
   body('phone')
@@ -248,7 +254,10 @@ const importCSVSchema = [
   
   body('leads.*.name')
     .optional()
-    .isLength({ min: 2, max: 255 })
+    .custom((value) => {
+      if (value === null || value === undefined || value === '') return true;
+      return value.length >= 2 && value.length <= 255;
+    })
     .withMessage('Name must be between 2 and 255 characters'),
   
   body('leads.*.phone')

@@ -14,9 +14,13 @@ const adminRoutes = require('./routes/admin');
 const departmentHeadRoutes = require('./routes/departmentHeads');
 const departmentUserRoutes = require('./routes/departmentUsers');
 const leadRoutes = require('./routes/leads');
+const quotationRoutes = require('./routes/quotations');
+const paymentRoutes = require('./routes/payments');
+const proformaInvoiceRoutes = require('./routes/proformaInvoices');
+const notificationRoutes = require('./routes/notifications');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 4500;
 
 // Security middleware
 app.use(helmet());
@@ -35,8 +39,17 @@ app.options('*', cors(corsOptions));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, 
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, 
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Skip limiting for local development and localhost IPs
+  skip: (req) => {
+    const isLocalEnv = (process.env.NODE_ENV || 'development') !== 'production';
+    const ip = req.ip || '';
+    const isLocalIp = ip === '::1' || ip === '127.0.0.1' || ip.startsWith('::ffff:127.0.0.1');
+    return isLocalEnv || isLocalIp;
+  },
   message: {
     error: 'Too many requests from this IP, please try again later.'
   }
@@ -83,6 +96,10 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/admin/department-heads', departmentHeadRoutes);
 app.use('/api/admin/department-users', departmentUserRoutes);
 app.use('/api/leads', leadRoutes);
+app.use('/api/quotations', quotationRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/proforma-invoices', proformaInvoiceRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler
