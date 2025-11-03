@@ -20,7 +20,8 @@ router.post('/', mapLeadFields, validateRequest(createLeadSchema), LeadControlle
 router.get('/', validateRequest(querySchema, 'query'), LeadController.getAll);
 router.get('/stats', LeadController.getStats);
 router.get('/:id', validateRequest(idParamSchema, 'params'), LeadController.getById);
-router.put('/:id', mapLeadFields, validateRequest([...idParamSchema, ...updateLeadSchema]), LeadController.update);
+// IMPORTANT: Do not map fields on update to avoid overwriting existing data with blanks
+router.put('/:id', validateRequest([...idParamSchema, ...updateLeadSchema]), LeadController.update);
 router.delete('/:id', validateRequest(idParamSchema, 'params'), LeadController.delete);
 
 router.post('/:id/transfer', validateRequest(idParamSchema, 'params'), LeadController.transferLead);

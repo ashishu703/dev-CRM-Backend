@@ -23,22 +23,23 @@ class LeadAssignmentService {
       return;
     }
 
+    // Directly copy all fields from DH lead
     const upsertPayload = {
       id: dhLead.id,
       dh_lead_id: dhLead.id,
-      name: dhLead.customer || null,
-      phone: dhLead.phone || null,
-      email: dhLead.email || null,
-      business: dhLead.business || null,
-      address: dhLead.address || null,
-      gst_no: dhLead.gst_no || null,
-      product_type: dhLead.product_names || null,
-      state: dhLead.state || null,
-      lead_source: dhLead.lead_source || null,
-      customer_type: dhLead.customer_type || null,
-      date: dhLead.date || null,
-      sales_status: dhLead.sales_status || null,
-      whatsapp: dhLead.whatsapp || null,
+      name: dhLead.customer,
+      phone: dhLead.phone,
+      email: dhLead.email,
+      business: dhLead.business,
+      address: dhLead.address,
+      gst_no: dhLead.gst_no,
+      product_type: dhLead.product_names,
+      state: dhLead.state,
+      lead_source: dhLead.lead_source,
+      customer_type: dhLead.customer_type,
+      date: dhLead.date,
+      sales_status: dhLead.sales_status,
+      whatsapp: dhLead.whatsapp,
       created_by: dhLead.created_by,
     };
 
