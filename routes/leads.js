@@ -9,7 +9,8 @@ const {
   updateLeadSchema,
   querySchema,
   importCSVSchema,
-  idParamSchema
+  idParamSchema,
+  batchUpdateSchema
 } = require('../apis/leads/validators');
 const SalespersonLeadController = require('../controllers/salespersonLeadController');
 const upload = require('../middleware/upload');
@@ -19,6 +20,8 @@ router.use(protect);
 router.post('/', mapLeadFields, validateRequest(createLeadSchema), LeadController.create);
 router.get('/', validateRequest(querySchema, 'query'), LeadController.getAll);
 router.get('/stats', LeadController.getStats);
+// Batch update MUST come before parametric :id routes
+router.put('/batch', validateRequest(batchUpdateSchema), LeadController.batchUpdate);
 router.get('/:id', validateRequest(idParamSchema, 'params'), LeadController.getById);
 // IMPORTANT: Do not map fields on update to avoid overwriting existing data with blanks
 router.put('/:id', validateRequest([...idParamSchema, ...updateLeadSchema]), LeadController.update);

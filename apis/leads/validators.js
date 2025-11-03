@@ -217,8 +217,8 @@ const querySchema = [
   
   query('limit')
     .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage('Limit must be between 1 and 100'),
+    .isInt({ min: 1, max: 1000 })
+    .withMessage('Limit must be between 1 and 1000'),
   
   query('search')
     .optional()
@@ -347,11 +347,25 @@ const idParamSchema = [
     .withMessage('Lead ID must be a positive integer')
 ];
 
+// Validation rules for batch update
+const batchUpdateSchema = [
+  body('ids')
+    .isArray({ min: 1 })
+    .withMessage('ids must be a non-empty array'),
+  body('ids.*')
+    .isInt({ min: 1 })
+    .withMessage('Each id must be a positive integer'),
+  body('updateData')
+    .isObject()
+    .withMessage('updateData must be an object')
+];
+
 module.exports = {
   createLeadSchema,
   updateLeadSchema,
   querySchema,
   importCSVSchema,
   idParamSchema,
+  batchUpdateSchema,
   salespersonLeadUpdateSchema: []
 };

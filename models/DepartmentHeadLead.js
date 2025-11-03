@@ -6,14 +6,24 @@ class DepartmentHeadLead extends BaseModel {
   }
 
   async createFromUi(uiLead, createdBy) {
+    // Prevent duplicates per creator by phone
+    if (uiLead.phone) {
+      const checkRes = await DepartmentHeadLead.query(
+        'SELECT id FROM department_head_leads WHERE created_by = $1 AND phone = $2 LIMIT 1',
+        [createdBy, uiLead.phone]
+      );
+      if (checkRes.rows && checkRes.rows[0]) {
+        return checkRes.rows[0];
+      }
+    }
     const query = `
       INSERT INTO department_head_leads (
         customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,NOW(),NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW(),NOW())
       RETURNING id
     `;
 
@@ -35,7 +45,6 @@ class DepartmentHeadLead extends BaseModel {
       uiLead.state || null,
       uiLead.customerType || null,
       uiLead.date || null,
-      uiLead.salesStatus || 'pending',
       uiLead.whatsapp || null,
       uiLead.assignedSalesperson || null,
       uiLead.assignedTelecaller || null,
@@ -48,9 +57,26 @@ class DepartmentHeadLead extends BaseModel {
 
   async bulkCreateFromUi(rows, createdBy) {
     if (!Array.isArray(rows) || rows.length === 0) return { rowCount: 0 };
+    // Deduplicate by phone within this creator: skip rows whose phone already exists for createdBy
+    const phones = Array.from(new Set(rows.map(r => (r.phone || '').toString().trim()).filter(p => p.length > 0)));
+    let existingPhoneSet = new Set();
+    if (phones.length > 0) {
+      const placeholdersPhones = phones.map((_, idx) => `$${idx + 2}`).join(',');
+      const q = `SELECT phone FROM department_head_leads WHERE created_by = $1 AND phone IN (${placeholdersPhones})`;
+      const res = await DepartmentHeadLead.query(q, [createdBy, ...phones]);
+      existingPhoneSet = new Set((res.rows || []).map(r => (r.phone || '').toString().trim()));
+    }
+
+    const filteredRows = rows.filter(r => {
+      const p = (r.phone || '').toString().trim();
+      return p.length === 0 || !existingPhoneSet.has(p);
+    });
+    if (filteredRows.length === 0) {
+      return { rowCount: 0, rows: [] };
+    }
     let i = 1;
-    const placeholders = rows.map(() =>
-      `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},NOW(),NOW())`
+    const placeholders = filteredRows.map(() =>
+      `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},NOW(),NOW())`
     ).join(',');
 
     const query = `
@@ -58,13 +84,13 @@ class DepartmentHeadLead extends BaseModel {
         customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       ) VALUES ${placeholders}
       RETURNING id
     `;
 
-    const values = rows.flatMap((r) => [
+    const values = filteredRows.flatMap((r) => [
       r.customerId || null,
       r.customer || null,
       r.email || null,
@@ -82,13 +108,11 @@ class DepartmentHeadLead extends BaseModel {
       r.state || null,
       r.customerType || null,
       r.date || null,
-      r.salesStatus || 'pending',
       r.whatsapp || null,
       r.assignedSalesperson || null,
       r.assignedTelecaller || null,
       createdBy
     ]);
-
     return DepartmentHeadLead.query(query, values);
   }
 
@@ -98,7 +122,7 @@ class DepartmentHeadLead extends BaseModel {
         id, customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       FROM department_head_leads
     `;
@@ -169,7 +193,7 @@ class DepartmentHeadLead extends BaseModel {
         id, customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        sales_status, whatsapp, assigned_salesperson, assigned_telecaller,
+        whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       FROM department_head_leads
       WHERE id = $1
@@ -183,7 +207,7 @@ class DepartmentHeadLead extends BaseModel {
       'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
       'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
       'phone', 'address', 'gstNo', 'state', 'customerType', 'date',
-      'salesStatus', 'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
+      'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
     ];
 
     const fieldMap = {
@@ -220,6 +244,53 @@ class DepartmentHeadLead extends BaseModel {
       WHERE id = $${paramCount}
     `;
     values.push(id);
+    return await DepartmentHeadLead.query(query, values);
+  }
+
+  async updateManyForCreator(ids, updateData, createdBy) {
+    if (!Array.isArray(ids) || ids.length === 0) return { rowCount: 0 };
+    const allowedFields = [
+      'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
+      'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
+      'phone', 'address', 'gstNo', 'state', 'customerType', 'date',
+      'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
+    ];
+
+    const fieldMap = {
+      leadSource: 'lead_source',
+      productNames: 'product_names',
+      salesStatus: 'sales_status',
+      telecallerStatus: 'telecaller_status',
+      paymentStatus: 'payment_status',
+      gstNo: 'gst_no',
+      customerType: 'customer_type',
+      assignedSalesperson: 'assigned_salesperson',
+      assignedTelecaller: 'assigned_telecaller'
+    };
+
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    Object.keys(updateData).forEach((key) => {
+      if (allowedFields.includes(key) && updateData[key] !== undefined) {
+        const column = fieldMap[key] || key;
+        updates.push(`${column} = $${paramCount++}`);
+        values.push(updateData[key]);
+      }
+    });
+
+    if (updates.length === 0) return { rowCount: 0 };
+
+    const idPlaceholders = ids.map((_id, idx) => `$${paramCount + idx}`).join(',');
+    const createdByIdx = paramCount + ids.length;
+
+    const query = `
+      UPDATE department_head_leads
+      SET ${updates.join(', ')}, updated_at = NOW()
+      WHERE id IN (${idPlaceholders}) AND created_by = $${createdByIdx}
+    `;
+    values.push(...ids, createdBy);
     return await DepartmentHeadLead.query(query, values);
   }
 

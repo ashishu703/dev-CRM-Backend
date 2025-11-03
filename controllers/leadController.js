@@ -51,8 +51,7 @@ class LeadController {
         search,
         state,
         productType,
-        connectedStatus,
-        createdBy
+        connectedStatus
       } = req.query;
 
       const filters = {};
@@ -60,7 +59,8 @@ class LeadController {
       if (state) filters.state = state;
       if (productType) filters.productType = productType;
       if (connectedStatus) filters.connectedStatus = connectedStatus;
-      if (createdBy) filters.createdBy = createdBy;
+      // Always scope to the authenticated creator (department head)
+      filters.createdBy = req.user.email;
 
       const pagination = {
         limit: parseInt(limit),
@@ -161,6 +161,35 @@ class LeadController {
     }
   }
 
+  // Batch update leads (scoped to creator)
+  async batchUpdate(req, res) {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.array()
+        });
+      }
+
+      const { ids, updateData } = req.body;
+      const result = await DepartmentHeadLead.updateManyForCreator(ids, updateData, req.user.email);
+
+      // Sync salesperson leads if assignment-related fields changed
+      if (result && result.rowCount > 0 && (updateData.assignedSalesperson || updateData.assignedTelecaller)) {
+        for (const id of ids) {
+          await leadAssignmentService.syncSalespersonLead(id);
+        }
+      }
+
+      return res.json({ success: true, updated: result?.rowCount || 0 });
+    } catch (error) {
+      console.error('Error batch updating leads:', error);
+      res.status(500).json({ success: false, message: 'Failed to batch update leads', error: error.message });
+    }
+  }
+
   // Delete lead
   async delete(req, res) {
     try {
@@ -224,10 +253,11 @@ class LeadController {
         }
       }
 
+      const importedCount = result?.rowCount ?? 0;
       res.status(201).json({
         success: true,
-        message: `Successfully imported ${req.body.leads.length} leads`,
-        data: { importedCount: req.body.leads.length }
+        message: `Successfully imported ${importedCount} leads`,
+        data: { importedCount }
       });
     } catch (error) {
       console.error('Error importing CSV:', error);
