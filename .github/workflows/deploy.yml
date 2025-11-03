@@ -21,12 +21,14 @@ jobs:
 
       - name: Deploy on VPS
         run: |
-          # YAHAN FIX KIYA GAYA HAI: --tt ko -tt kar diya hai
-          ssh -i ~/.ssh/id_rsa -tt root@${{ secrets.SERVER_IP }} << 'EOF'
-            set -e
-            cd /var/www/myapp
-            git fetch origin master
-            git reset --hard origin/master
-            docker compose down
-            docker compose up -d --build
-          EOF
+          # YAHAN FIX KIYA GAYA HAI:
+          # '<< EOF' ko hata kar command ko seedha SSH mein bhej diya hai
+          ssh -i ~/.ssh/id_rsa -tt root@${{ secrets.SERVER_IP }} " \
+            set -e; \
+            cd /var/www/myapp; \
+            git fetch origin master; \
+            git reset --hard origin/master; \
+            docker compose down; \
+            docker compose up -d --build; \
+            echo 'Deployment successful!'; \
+          "
