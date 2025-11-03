@@ -78,13 +78,16 @@ class SalespersonLead extends BaseModel {
     return await SalespersonLead.query(query, values);
   }
 
-  async listForUser(_username) {
-    // Return all rows present in salesperson_leads; DH assignment may change over time
+  async listForUser(username) {
+    // Strict check: only return leads assigned to this username in department_head_leads
     const query = `
-      SELECT * FROM salesperson_leads
-      ORDER BY updated_at DESC
+      SELECT sl.*
+      FROM salesperson_leads sl
+      JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
+      WHERE COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($1))
+      ORDER BY sl.updated_at DESC
     `;
-    const result = await SalespersonLead.query(query, []);
+    const result = await SalespersonLead.query(query, [username]);
     return result.rows || [];
   }
 
