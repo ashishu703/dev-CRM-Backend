@@ -12,6 +12,27 @@ class AuthService {
   }
 
   /**
+   * Map backend role/department to a strict UI user type for dashboard routing
+   * @param {string} role - 'superadmin' | 'department_head' | 'department_user'
+   * @param {string|null} departmentType - e.g., 'marketing_sales', 'office_sales', 'production', 'Marketing Department'
+   * @returns {string}
+   */
+  mapUiUserType(role, departmentType) {
+    const dept = (departmentType || '').toLowerCase();
+    if (role === 'superadmin') return 'superadmin';
+    if (role === 'department_head') {
+      if (dept === 'marketing_sales' || dept === 'marketing department') return 'marketingdepartmenthead';
+      if (dept === 'hr' || dept === 'human resources') return 'hrdepartmenthead';
+      if (dept === 'production' || dept === 'production department') return 'productiondepartmenthead';
+      return 'salesdepartmenthead';
+    }
+    // department_user
+    if (dept === 'production' || dept === 'production department') return 'production-staff';
+    if (dept === 'marketing_sales' || dept === 'marketing department') return 'marketing-salesperson';
+    return 'salesperson';
+  }
+
+  /**
    * Generate JWT token with subject type
    * @param {Object} subject - Token payload
    * @returns {string} JWT token
@@ -109,7 +130,8 @@ class AuthService {
         email: user.email,
         role: userType === 'department_head' ? 'department_head' : 'department_user',
         departmentType: user.department_type,
-        companyName: user.company_name
+        companyName: user.company_name,
+        uiUserType: this.mapUiUserType(userType, user.department_type)
       };
 
       if (userType === 'department_head') {
@@ -155,7 +177,8 @@ class AuthService {
             id: superAdmin.id,
             username: superAdmin.username,
             email: superAdmin.email,
-            role: 'superadmin'
+            role: 'superadmin',
+            uiUserType: this.mapUiUserType('superadmin', null)
           },
           token
         };
@@ -200,7 +223,8 @@ class AuthService {
         email: user.email,
         role: userType,
         departmentType: user.department_type,
-        companyName: user.company_name
+        companyName: user.company_name,
+        uiUserType: this.mapUiUserType(userType, user.department_type)
       };
 
       if (userType === 'department_head') {
@@ -296,6 +320,7 @@ class AuthService {
         role: userType,
         departmentType: newUser.department_type,
         companyName: newUser.company_name,
+        uiUserType: this.mapUiUserType(userType, newUser.department_type),
         createdAt: newUser.created_at
       };
 
@@ -372,6 +397,7 @@ class AuthService {
         role: userType,
         departmentType: user.department_type,
         companyName: user.company_name,
+        uiUserType: this.mapUiUserType(userType, user.department_type),
         isActive: user.is_active,
         createdAt: user.created_at,
         updatedAt: user.updated_at
