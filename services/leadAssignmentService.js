@@ -24,10 +24,16 @@ class LeadAssignmentService {
     }
 
     // Directly copy all fields from DH lead
+    const safeName = (dhLead.customer && dhLead.customer.trim())
+      || (dhLead.business && dhLead.business.trim())
+      || (dhLead.phone && String(dhLead.phone).trim())
+      || (dhLead.customer_id && String(dhLead.customer_id).trim())
+      || 'Unknown';
+
     const upsertPayload = {
       id: dhLead.id,
       dh_lead_id: dhLead.id,
-      name: dhLead.customer,
+      name: safeName,
       phone: dhLead.phone,
       email: dhLead.email,
       business: dhLead.business,
