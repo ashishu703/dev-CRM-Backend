@@ -1,6 +1,13 @@
 const SalespersonLead = require('../models/SalespersonLead');
 const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const storageService = require('../services/storageService');
+const leadAssignmentService = require('../services/leadAssignmentService');
+
+function isEmptyLike(v) {
+  if (v === null || v === undefined) return true;
+  const s = String(v).trim().toLowerCase();
+  return s === '' || s === 'n/a' || s === 'na' || s === '-';
+}
 
 class SalespersonLeadController {
   async listForLoggedInUser(req, res) {
@@ -43,11 +50,124 @@ class SalespersonLeadController {
     }
   }
 
+  // Create a lead from salesperson UI and reflect it to DH immediately
+  async createLeadFromSalesperson(req, res) {
+    try {
+      const DepartmentHead = require('../models/DepartmentHead');
+      let createdBy = req.user?.email;
+      try {
+        if (req.user?.headUserId) {
+          const head = await DepartmentHead.findById(req.user.headUserId);
+          if (head && head.email) createdBy = head.email; // Scope to owning head
+        }
+      } catch (_) {}
+      const username = req.user?.username;
+      const ui = req.body || {};
+
+      // Build UI payload for DH model
+      const dhUi = {
+        customerId: ui.customerId || null,
+        customer: ui.name || ui.customer || null,
+        email: ui.email || null,
+        business: ui.business || null,
+        leadSource: ui.lead_source || ui.leadSource || null,
+        productNames: ui.product_type || ui.productNames || null,
+        category: ui.category || null,
+        salesStatus: ui.sales_status || null,
+        phone: ui.phone || null,
+        address: ui.address || null,
+        gstNo: ui.gst_no || ui.gstNo || null,
+        state: ui.state || null,
+        customerType: ui.customer_type || ui.customerType || null,
+        date: ui.date || null,
+        whatsapp: ui.whatsapp || null,
+        assignedSalesperson: username || ui.assignedSalesperson || null,
+        assignedTelecaller: ui.assignedTelecaller || null,
+      };
+
+      const created = await DepartmentHeadLead.createFromUi(dhUi, createdBy);
+      if (!created || !created.id) {
+        return res.status(500).json({ success: false, message: 'Failed to create lead' });
+      }
+
+      await leadAssignmentService.syncSalespersonLead(created.id);
+      const spRow = await SalespersonLead.getById(created.id);
+      return res.json({ success: true, data: spRow || { id: created.id } });
+    } catch (error) {
+      console.error('Error creating salesperson lead:', error);
+      return res.status(500).json({ success: false, message: 'Failed to create lead', error: error.message });
+    }
+  }
+
+  // Import multiple leads from salesperson UI and reflect to DH
+  async importLeadsFromSalesperson(req, res) {
+    try {
+      const DepartmentHead = require('../models/DepartmentHead');
+      let createdBy = req.user?.email;
+      try {
+        if (req.user?.headUserId) {
+          const head = await DepartmentHead.findById(req.user.headUserId);
+          if (head && head.email) createdBy = head.email; // Scope to owning head
+        }
+      } catch (_) {}
+      const username = req.user?.username;
+      const { leads } = req.body || {};
+      if (!Array.isArray(leads) || leads.length === 0) {
+        return res.status(400).json({ success: false, message: 'Leads data must be a non-empty array' });
+      }
+
+      // Normalize to DH UI rows
+      const rows = leads.map((l) => ({
+        customerId: l.customerId || null,
+        customer: l.name || l.customer || null,
+        email: l.email || null,
+        business: l.business || null,
+        leadSource: l.lead_source || l.leadSource || null,
+        productNames: l.product_type || l.productNames || null,
+        category: l.category || null,
+        salesStatus: l.sales_status || null,
+        phone: l.phone || null,
+        address: l.address || null,
+        gstNo: l.gst_no || l.gstNo || null,
+        state: l.state || null,
+        customerType: l.customer_type || l.customerType || null,
+        date: l.date || null,
+        whatsapp: l.whatsapp || null,
+        assignedSalesperson: username || l.assignedSalesperson || null,
+        assignedTelecaller: l.assignedTelecaller || null,
+      }));
+
+      const result = await DepartmentHeadLead.bulkCreateFromUi(rows, createdBy);
+      // Sync each created id
+      if (result?.rows?.length) {
+        for (const r of result.rows) {
+          if (r.id) await leadAssignmentService.syncSalespersonLead(r.id);
+        }
+      }
+      return res.json({ success: true, created: result?.rowCount || result?.rows?.length || 0 });
+    } catch (error) {
+      console.error('Error importing salesperson leads:', error);
+      return res.status(500).json({ success: false, message: 'Failed to import leads', error: error.message });
+    }
+  }
+
   async updateById(req, res) {
     try {
       const { id } = req.params;
+      const username = req.user?.username;
 
       const updatePayload = { ...req.body };
+
+      // Normalize empties to null to satisfy PostgreSQL types
+      const toNullIfEmpty = (v) => (v === '' || v === undefined ? null : v);
+      updatePayload.date = toNullIfEmpty(updatePayload.date);
+      updatePayload.follow_up_date = toNullIfEmpty(updatePayload.follow_up_date);
+      updatePayload.follow_up_time = toNullIfEmpty(updatePayload.follow_up_time);
+      updatePayload.whatsapp = toNullIfEmpty(updatePayload.whatsapp);
+      updatePayload.sales_status_remark = toNullIfEmpty(updatePayload.sales_status_remark);
+      updatePayload.follow_up_status = toNullIfEmpty(updatePayload.follow_up_status);
+      updatePayload.follow_up_remark = toNullIfEmpty(updatePayload.follow_up_remark);
+      updatePayload.transferred_to = toNullIfEmpty(updatePayload.transferred_to);
 
       if (updatePayload.quotation_count === '' || updatePayload.quotation_count === undefined) {
         updatePayload.quotation_count = null;
@@ -83,7 +203,36 @@ class SalespersonLeadController {
           });
           updatePayload.payment_receipt_url = url;
         }
-        
+      }
+
+      // Enforce: salesperson can only edit certain DH fields if they are empty/N/A and lead is assigned to them
+      const dhRow = await DepartmentHeadLead.getById(id);
+      if (dhRow) {
+        const assignedToUser = [dhRow.assigned_salesperson, dhRow.assigned_telecaller].filter(Boolean).includes(username);
+        const guardFields = {
+          business: 'business',
+          address: 'address',
+          gst_no: 'gst_no',
+          product_type: 'product_names',
+          state: 'state',
+          lead_source: 'lead_source',
+        };
+        if (!assignedToUser) {
+          // If not assigned, strip guarded fields from update
+          for (const k of Object.keys(guardFields)) {
+            if (Object.prototype.hasOwnProperty.call(updatePayload, k)) delete updatePayload[k];
+          }
+        } else {
+          // Assigned: allow only when DH value is empty-like
+          for (const [spKey, dhCol] of Object.entries(guardFields)) {
+            if (Object.prototype.hasOwnProperty.call(updatePayload, spKey)) {
+              const existing = dhRow[dhCol];
+              if (!isEmptyLike(existing)) {
+                delete updatePayload[spKey];
+              }
+            }
+          }
+        }
       }
 
       const result = await SalespersonLead.updateById(id, updatePayload);
@@ -103,9 +252,20 @@ class SalespersonLeadController {
         if (updatePayload.customer_type !== undefined) dhUpdate.customerType = updatePayload.customer_type;
         if (updatePayload.date !== undefined) dhUpdate.date = updatePayload.date;
         if (updatePayload.sales_status !== undefined) dhUpdate.salesStatus = updatePayload.sales_status;
+        if (updatePayload.follow_up_status !== undefined) dhUpdate.telecallerStatus = updatePayload.follow_up_status;
         if (updatePayload.whatsapp !== undefined) dhUpdate.whatsapp = updatePayload.whatsapp;
 
-        await DepartmentHeadLead.updateById(id, dhUpdate);
+        if (Object.keys(dhUpdate).length > 0) {
+          const syncRes = await DepartmentHeadLead.updateById(id, dhUpdate);
+          if (!syncRes || syncRes.rowCount === 0 && (updatePayload.phone || updatePayload.email)) {
+            // Optional fallback: try to find DH by phone if ids are out of sync
+            try {
+              const maybeDh = await DepartmentHeadLead.query('SELECT id FROM department_head_leads WHERE phone = $1 LIMIT 1', [updatePayload.phone]);
+              const row = maybeDh?.rows?.[0];
+              if (row?.id) await DepartmentHeadLead.updateById(row.id, dhUpdate);
+            } catch (_) {}
+          }
+        }
       } catch (syncError) {
         console.warn('DH sync skipped due to error:', syncError.message);
       }

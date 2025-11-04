@@ -41,7 +41,7 @@ class DepartmentHeadLead extends BaseModel {
       uiLead.paymentStatus || 'PENDING',
       uiLead.phone || null,
       uiLead.address || null,
-      uiLead.gstNo || null,
+      (uiLead.gstNo === undefined || uiLead.gstNo === null || String(uiLead.gstNo).trim() === '' ? 'N/A' : uiLead.gstNo),
       uiLead.state || null,
       uiLead.customerType || null,
       uiLead.date || null,
@@ -104,7 +104,7 @@ class DepartmentHeadLead extends BaseModel {
       r.paymentStatus || 'PENDING',
       r.phone || null,
       r.address || null,
-      r.gstNo || null,
+      (r.gstNo === undefined || r.gstNo === null || String(r.gstNo).trim() === '' ? 'N/A' : r.gstNo),
       r.state || null,
       r.customerType || null,
       r.date || null,
@@ -119,12 +119,16 @@ class DepartmentHeadLead extends BaseModel {
   async getAll(filters = {}, pagination = {}) {
     let query = `
       SELECT 
-        id, customer_id, customer, email, business, lead_source, product_names, category,
-        sales_status, created, telecaller_status, payment_status,
-        phone, address, gst_no, state, customer_type, date,
-        whatsapp, assigned_salesperson, assigned_telecaller,
-        created_by, created_at, updated_at
-      FROM department_head_leads
+        dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, dhl.product_names, dhl.category,
+        dhl.sales_status, dhl.created, dhl.telecaller_status, dhl.payment_status,
+        dhl.phone, dhl.address, dhl.gst_no, dhl.state, dhl.customer_type, dhl.date,
+        dhl.whatsapp, dhl.assigned_salesperson, dhl.assigned_telecaller,
+        dhl.created_by, dhl.created_at, dhl.updated_at,
+        sl.follow_up_status AS follow_up_status,
+        sl.follow_up_remark AS follow_up_remark,
+        sl.sales_status_remark AS sales_status_remark
+      FROM department_head_leads dhl
+      LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
     `;
     
     const conditions = [];
@@ -133,31 +137,31 @@ class DepartmentHeadLead extends BaseModel {
 
     // Add filters
     if (filters.search) {
-      conditions.push(`(customer ILIKE $${paramCount} OR email ILIKE $${paramCount} OR business ILIKE $${paramCount})`);
+      conditions.push(`(dhl.customer ILIKE $${paramCount} OR dhl.email ILIKE $${paramCount} OR dhl.business ILIKE $${paramCount})`);
       values.push(`%${filters.search}%`);
       paramCount++;
     }
 
     if (filters.state) {
-      conditions.push(`state = $${paramCount}`);
+      conditions.push(`dhl.state = $${paramCount}`);
       values.push(filters.state);
       paramCount++;
     }
 
     if (filters.productType) {
-      conditions.push(`product_type = $${paramCount}`);
+      conditions.push(`dhl.product_names = $${paramCount}`);
       values.push(filters.productType);
       paramCount++;
     }
 
     if (filters.salesStatus) {
-      conditions.push(`sales_status = $${paramCount}`);
+      conditions.push(`dhl.sales_status = $${paramCount}`);
       values.push(filters.salesStatus);
       paramCount++;
     }
 
     if (filters.createdBy) {
-      conditions.push(`created_by = $${paramCount}`);
+      conditions.push(`dhl.created_by = $${paramCount}`);
       values.push(filters.createdBy);
       paramCount++;
     }
@@ -168,7 +172,7 @@ class DepartmentHeadLead extends BaseModel {
     }
 
     // Add ORDER BY
-    query += ` ORDER BY created_at DESC`;
+    query += ` ORDER BY dhl.created_at DESC`;
 
     // Add pagination
     if (pagination.limit) {
@@ -190,13 +194,17 @@ class DepartmentHeadLead extends BaseModel {
   async getById(id) {
     const query = `
       SELECT 
-        id, customer_id, customer, email, business, lead_source, product_names, category,
-        sales_status, created, telecaller_status, payment_status,
-        phone, address, gst_no, state, customer_type, date,
-        whatsapp, assigned_salesperson, assigned_telecaller,
-        created_by, created_at, updated_at
-      FROM department_head_leads
-      WHERE id = $1
+        dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, dhl.product_names, dhl.category,
+        dhl.sales_status, dhl.created, dhl.telecaller_status, dhl.payment_status,
+        dhl.phone, dhl.address, dhl.gst_no, dhl.state, dhl.customer_type, dhl.date,
+        dhl.whatsapp, dhl.assigned_salesperson, dhl.assigned_telecaller,
+        dhl.created_by, dhl.created_at, dhl.updated_at,
+        sl.follow_up_status AS follow_up_status,
+        sl.follow_up_remark AS follow_up_remark,
+        sl.sales_status_remark AS sales_status_remark
+      FROM department_head_leads dhl
+      LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
+      WHERE dhl.id = $1
     `;
     const result = await DepartmentHeadLead.query(query, [id]);
     return result.rows && result.rows[0] ? result.rows[0] : null;

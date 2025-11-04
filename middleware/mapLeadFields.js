@@ -8,22 +8,24 @@ function mapSingleLead(input) {
     return `CUST-${timestamp}${random}`;
   };
 
+  const nameVal = input.name || input.customer || input.customerName || input.nameText || '';
   const mapped = {
-    name: input.name || input.customer || input.customerName || input.nameText || '',
+    name: nameVal,
+    customer: input.customer || nameVal || '',
     phone: input.phone || input.mobileNumber || input.mobile || input.whatsapp || '',
-    email: input.email || null,
-    business: input.business || input.businessType || null,
-    address: input.address || null,
+    email: input.email || 'N/A',
+    business: input.business || input.businessType || 'N/A',
+    address: input.address || 'N/A',
     gstNo: input.gstNo || input.gstNumber || 'N/A',
-    productNames: input.productNames || input.productNamesText || input.productNames || input['Product Name'] || null,
+    productNames: input.productNames || input.productNamesText || input.productNames || input['Product Name'] || 'N/A',
     state: input.state || 'N/A',
-    leadSource: input.leadSource || input.lead_type || input.leadType || null,
+    leadSource: input.leadSource || input.lead_type || input.leadType || 'N/A',
     customerType: input.customerType || 'business',
     date: input.date || input.createdAt || input['Created'] || new Date().toISOString().split('T')[0],
     connectedStatus: input.connectedStatus || 'pending',
     finalStatus: input.finalStatus || 'open',
-    whatsapp: input.whatsapp || input.phone || input.mobileNumber || input.mobile || '',
-    category: input.category || input.businessCategory || null,
+    whatsapp: input.whatsapp || input.phone || input.mobileNumber || input.mobile || 'N/A',
+    category: input.category || input.businessCategory || 'N/A',
     assignedSalesperson: input.assignedSalesperson || input.assigned || null,
     assignedTelecaller: input.assignedTelecaller || input.telecaller || null,
     customerId: input.customerId || generateCustomerId()
@@ -33,7 +35,16 @@ function mapSingleLead(input) {
     const val = mapped[key];
     if (typeof val === 'string') {
       const t = val.trim();
-      mapped[key] = t.length > 0 ? t : (key === 'name' || key === 'phone' ? '' : null);
+      // Keep 'N/A' defaults; only blank-out name/phone to '' and leave others as 'N/A'
+      if (t.length === 0) {
+        if (key === 'name' || key === 'phone') {
+          mapped[key] = '';
+        } else {
+          mapped[key] = 'N/A';
+        }
+      } else {
+        mapped[key] = t;
+      }
     }
   });
 

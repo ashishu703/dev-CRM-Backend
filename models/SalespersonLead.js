@@ -79,7 +79,6 @@ class SalespersonLead extends BaseModel {
   }
 
   async listForUser(username) {
-    // Strict check: only return leads assigned to this username in department_head_leads
     const query = `
       SELECT sl.*
       FROM salesperson_leads sl
@@ -116,6 +115,10 @@ class SalespersonLead extends BaseModel {
       'whatsapp',
       'sales_status',
       'sales_status_remark',
+      'follow_up_status',
+      'follow_up_remark',
+      'follow_up_date',
+      'follow_up_time',
       'quotation_url',
       'quotation_count',
       'proforma_invoice_url',
