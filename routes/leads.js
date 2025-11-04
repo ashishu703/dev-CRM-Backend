@@ -35,6 +35,10 @@ router.post('/import', mapLeadArray, validateRequest(importCSVSchema), LeadContr
 router.get('/assigned/salesperson', SalespersonLeadController.listForLoggedInUser);
 router.get('/assigned/salesperson/:username', SalespersonLeadController.listForUsername);
 
+// Salesperson lead create/import so DH also sees them
+router.post('/assigned/salesperson/lead', SalespersonLeadController.createLeadFromSalesperson);
+router.post('/assigned/salesperson/import', validateRequest(importCSVSchema), SalespersonLeadController.importLeadsFromSalesperson);
+
 // Salesperson lead details and updates (including file uploads)
 router.get('/assigned/salesperson/lead/:id', validateRequest(idParamSchema, 'params'), SalespersonLeadController.getById);
 router.put(

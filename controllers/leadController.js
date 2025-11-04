@@ -220,11 +220,6 @@ class LeadController {
   // Import leads from CSV
   async importCSV(req, res) {
     try {
-      console.log('Import CSV request received:', {
-        body: req.body,
-        user: req.user,
-        leadsCount: req.body.leads ? req.body.leads.length : 0
-      });
 
       if (!req.user) {
         console.log('No user found in request - authentication issue');
@@ -244,7 +239,6 @@ class LeadController {
 
       // Import into department_head_leads for DH workflow
       const result = await DepartmentHeadLead.bulkCreateFromUi(req.body.leads, req.user.email);
-      console.log('Database insert result:', result);
 
       // Sync salesperson leads for all inserted rows, if any assignments exist
       if (result && result.rows && result.rows.length) {
