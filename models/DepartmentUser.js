@@ -171,6 +171,16 @@ class DepartmentUser extends BaseModel {
     if (updateData.isActive !== undefined) mapped.is_active = updateData.isActive;
     if (updateData.emailVerified !== undefined) mapped.email_verified = updateData.emailVerified;
 
+    // Targets and period fields
+    if (updateData.target !== undefined) mapped.target = updateData.target;
+    if (updateData.achievedTarget !== undefined) mapped.achieved_target = updateData.achievedTarget;
+    if (updateData.targetStartDate !== undefined) mapped.target_start_date = updateData.targetStartDate;
+    if (updateData.targetEndDate !== undefined) mapped.target_end_date = updateData.targetEndDate;
+    if (updateData.targetDurationDays !== undefined) mapped.target_duration_days = updateData.targetDurationDays;
+    if (updateData.salesOrderTarget !== undefined) mapped.sales_order_target = updateData.salesOrderTarget;
+    if (updateData.achievedSalesOrderTarget !== undefined) mapped.achieved_sales_order_target = updateData.achievedSalesOrderTarget;
+    if (updateData.targetStatus !== undefined) mapped.target_status = updateData.targetStatus;
+
     if (updateData.password) {
       const bcrypt = require('bcryptjs');
       mapped.password = await bcrypt.hash(updateData.password, 12);

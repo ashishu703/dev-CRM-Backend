@@ -20,6 +20,13 @@ const updateUserSchema = Joi.object({
   companyName: Joi.string().min(1).max(255).optional(),
   headUserId: Joi.string().uuid().optional(),
   target: Joi.number().min(0).optional(),
+  achievedTarget: Joi.number().min(0).optional(),
+  salesOrderTarget: Joi.number().min(0).optional(),
+  achievedSalesOrderTarget: Joi.number().min(0).optional(),
+  targetStatus: Joi.string().valid('active', 'paused', 'completed').optional(),
+  targetStartDate: Joi.date().iso().optional(),
+  targetEndDate: Joi.date().iso().optional(),
+  targetDurationDays: Joi.number().integer().min(0).optional(),
   isActive: Joi.boolean().optional(),
   emailVerified: Joi.boolean().optional()
 });
