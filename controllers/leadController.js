@@ -237,8 +237,14 @@ class LeadController {
         });
       }
 
+      // Pre-filter: keep only rows that have at least a name or a phone
+      const sanitizedLeads = (req.body.leads || []).filter((l) => {
+        const name = (l.customer || l.customerName || '').toString().trim();
+        const phone = (l.phone || l['Mobile Number'] || '').toString().trim();
+        return name.length > 0 || phone.length > 0;
+      });
       // Import into department_head_leads for DH workflow
-      const result = await DepartmentHeadLead.bulkCreateFromUi(req.body.leads, req.user.email);
+      const result = await DepartmentHeadLead.bulkCreateFromUi(sanitizedLeads, req.user.email);
 
       // Sync salesperson leads for all inserted rows, if any assignments exist
       if (result && result.rows && result.rows.length) {
@@ -248,10 +254,11 @@ class LeadController {
       }
 
       const importedCount = result?.rowCount ?? 0;
+      const duplicatesCount = result?.duplicatesCount ?? 0;
       res.status(201).json({
         success: true,
-        message: `Successfully imported ${importedCount} leads`,
-        data: { importedCount }
+        message: `Successfully imported ${importedCount} leads${duplicatesCount ? `, ${duplicatesCount} duplicate(s) skipped` : ''}`,
+        data: { importedCount, duplicatesCount }
       });
     } catch (error) {
       console.error('Error importing CSV:', error);

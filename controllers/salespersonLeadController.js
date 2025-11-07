@@ -2,6 +2,7 @@ const SalespersonLead = require('../models/SalespersonLead');
 const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const storageService = require('../services/storageService');
 const leadAssignmentService = require('../services/leadAssignmentService');
+const SalespersonLeadHistory = require('../models/SalespersonLeadHistory');
 
 function isEmptyLike(v) {
   if (v === null || v === undefined) return true;
@@ -50,6 +51,17 @@ class SalespersonLeadController {
     }
   }
 
+  async getHistory(req, res) {
+    try {
+      const { id } = req.params;
+      const rows = await SalespersonLeadHistory.getByLead(id);
+      return res.json({ success: true, data: rows });
+    } catch (error) {
+      console.error('Error fetching lead history:', error);
+      return res.status(500).json({ success: false, message: 'Failed to fetch lead history', error: error.message });
+    }
+  }
+
   // Create a lead from salesperson UI and reflect it to DH immediately
   async createLeadFromSalesperson(req, res) {
     try {
@@ -65,6 +77,7 @@ class SalespersonLeadController {
       const ui = req.body || {};
 
       // Build UI payload for DH model
+      const customerType = ui.customer_type || ui.customerType || null;
       const dhUi = {
         customerId: ui.customerId || null,
         customer: ui.name || ui.customer || null,
@@ -72,13 +85,14 @@ class SalespersonLeadController {
         business: ui.business || null,
         leadSource: ui.lead_source || ui.leadSource || null,
         productNames: ui.product_type || ui.productNames || null,
-        category: ui.category || null,
+        // Map customer_type to category if category is not provided
+        category: ui.category || customerType || null,
         salesStatus: ui.sales_status || null,
         phone: ui.phone || null,
         address: ui.address || null,
         gstNo: ui.gst_no || ui.gstNo || null,
         state: ui.state || null,
-        customerType: ui.customer_type || ui.customerType || null,
+        customerType: customerType,
         date: ui.date || null,
         whatsapp: ui.whatsapp || null,
         assignedSalesperson: username || ui.assignedSalesperson || null,
@@ -111,31 +125,42 @@ class SalespersonLeadController {
         }
       } catch (_) {}
       const username = req.user?.username;
-      const { leads } = req.body || {};
+      let { leads } = req.body || {};
       if (!Array.isArray(leads) || leads.length === 0) {
         return res.status(400).json({ success: false, message: 'Leads data must be a non-empty array' });
       }
 
+      // Pre-filter: keep only rows that have at least a name or a phone
+      leads = leads.filter((l) => {
+        const name = (l.name || l.customer || '').toString().trim();
+        const phone = (l.phone || '').toString().trim();
+        return name.length > 0 || phone.length > 0;
+      });
+
       // Normalize to DH UI rows
-      const rows = leads.map((l) => ({
-        customerId: l.customerId || null,
-        customer: l.name || l.customer || null,
-        email: l.email || null,
-        business: l.business || null,
-        leadSource: l.lead_source || l.leadSource || null,
-        productNames: l.product_type || l.productNames || null,
-        category: l.category || null,
-        salesStatus: l.sales_status || null,
-        phone: l.phone || null,
-        address: l.address || null,
-        gstNo: l.gst_no || l.gstNo || null,
-        state: l.state || null,
-        customerType: l.customer_type || l.customerType || null,
-        date: l.date || null,
-        whatsapp: l.whatsapp || null,
-        assignedSalesperson: username || l.assignedSalesperson || null,
-        assignedTelecaller: l.assignedTelecaller || null,
-      }));
+      const rows = leads.map((l) => {
+        const customerType = l.customer_type || l.customerType || null;
+        return {
+          customerId: l.customerId || null,
+          customer: l.name || l.customer || null,
+          email: l.email || null,
+          business: l.business || null,
+          leadSource: l.lead_source || l.leadSource || null,
+          productNames: l.product_type || l.productNames || null,
+          // Map customer_type to category if category is not provided
+          category: l.category || customerType || null,
+          salesStatus: l.sales_status || null,
+          phone: l.phone || null,
+          address: l.address || null,
+          gstNo: l.gst_no || l.gstNo || null,
+          state: l.state || null,
+          customerType: customerType,
+          date: l.date || null,
+          whatsapp: l.whatsapp || null,
+          assignedSalesperson: username || l.assignedSalesperson || null,
+          assignedTelecaller: l.assignedTelecaller || null,
+        };
+      });
 
       const result = await DepartmentHeadLead.bulkCreateFromUi(rows, createdBy);
       // Sync each created id
@@ -144,7 +169,7 @@ class SalespersonLeadController {
           if (r.id) await leadAssignmentService.syncSalespersonLead(r.id);
         }
       }
-      return res.json({ success: true, created: result?.rowCount || result?.rows?.length || 0 });
+      return res.json({ success: true, created: result?.rowCount || result?.rows?.length || 0, duplicatesCount: result?.duplicatesCount || 0 });
     } catch (error) {
       console.error('Error importing salesperson leads:', error);
       return res.status(500).json({ success: false, message: 'Failed to import leads', error: error.message });
@@ -237,6 +262,20 @@ class SalespersonLeadController {
 
       const result = await SalespersonLead.updateById(id, updatePayload);
 
+      // Record history when follow-up fields or sales_status present
+      try {
+        const historyPayload = {
+          follow_up_status: updatePayload.follow_up_status,
+          follow_up_remark: updatePayload.follow_up_remark,
+          follow_up_date: updatePayload.follow_up_date,
+          follow_up_time: updatePayload.follow_up_time,
+          sales_status: updatePayload.sales_status,
+        };
+        await SalespersonLeadHistory.addEntry(id, historyPayload, username);
+      } catch (e) {
+        console.warn('Lead history write skipped:', e.message);
+      }
+
       // Sync updates back to Department Head lead record (same id)
       try {
         const dhUpdate = {};
@@ -249,10 +288,14 @@ class SalespersonLeadController {
         if (updatePayload.product_type !== undefined) dhUpdate.productNames = updatePayload.product_type;
         if (updatePayload.state !== undefined) dhUpdate.state = updatePayload.state;
         if (updatePayload.lead_source !== undefined) dhUpdate.leadSource = updatePayload.lead_source;
-        if (updatePayload.customer_type !== undefined) dhUpdate.customerType = updatePayload.customer_type;
+        if (updatePayload.customer_type !== undefined) {
+          dhUpdate.customerType = updatePayload.customer_type;
+          // Map customer_type to category column (e.g., CONTRACTOR -> category)
+          dhUpdate.category = updatePayload.customer_type;
+        }
         if (updatePayload.date !== undefined) dhUpdate.date = updatePayload.date;
         if (updatePayload.sales_status !== undefined) dhUpdate.salesStatus = updatePayload.sales_status;
-        if (updatePayload.follow_up_status !== undefined) dhUpdate.telecallerStatus = updatePayload.follow_up_status;
+        // Do not map follow_up_status to telecaller_status: it violates DH check constraint
         if (updatePayload.whatsapp !== undefined) dhUpdate.whatsapp = updatePayload.whatsapp;
 
         if (Object.keys(dhUpdate).length > 0) {

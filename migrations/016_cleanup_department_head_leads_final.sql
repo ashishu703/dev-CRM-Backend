@@ -7,6 +7,7 @@ SET gst_no = 'N/A'
 WHERE gst_no IS NULL OR gst_no = '';
 
 -- Drop unnecessary columns
+-- NOTE: DO NOT drop assigned_salesperson and assigned_telecaller as they are critical for salesperson lead assignments
 ALTER TABLE department_head_leads 
 DROP COLUMN IF EXISTS product_names,
 DROP COLUMN IF EXISTS created,
@@ -21,9 +22,10 @@ DROP COLUMN IF EXISTS customer_type,
 DROP COLUMN IF EXISTS date,
 DROP COLUMN IF EXISTS connected_status,
 DROP COLUMN IF EXISTS final_status,
-DROP COLUMN IF EXISTS whatsapp,
-DROP COLUMN IF EXISTS assigned_salesperson,
-DROP COLUMN IF EXISTS assigned_telecaller;
+DROP COLUMN IF EXISTS whatsapp;
+-- Preserve assigned_salesperson and assigned_telecaller - these are essential for salesperson functionality
+-- DROP COLUMN IF EXISTS assigned_salesperson,  -- COMMENTED OUT TO PRESERVE DATA
+-- DROP COLUMN IF EXISTS assigned_telecaller;   -- COMMENTED OUT TO PRESERVE DATA
 
 -- Set gst_no to NOT NULL with default value
 ALTER TABLE department_head_leads 

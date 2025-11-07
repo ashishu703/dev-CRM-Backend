@@ -41,6 +41,7 @@ router.post('/assigned/salesperson/import', validateRequest(importCSVSchema), Sa
 
 // Salesperson lead details and updates (including file uploads)
 router.get('/assigned/salesperson/lead/:id', validateRequest(idParamSchema, 'params'), SalespersonLeadController.getById);
+router.get('/assigned/salesperson/lead/:id/history', validateRequest(idParamSchema, 'params'), SalespersonLeadController.getHistory);
 router.put(
   '/assigned/salesperson/lead/:id',
   validateRequest(idParamSchema, 'params'),

@@ -424,12 +424,19 @@ class Quotation extends BaseModel {
     );
     const sentLogs = sentLogsRes.rows || [];
     
-    // Get PIs (rows array)
-    const pisRes = await query(
-      'SELECT * FROM proforma_invoices WHERE quotation_id = $1 ORDER BY created_at ASC',
-      [quotationId]
-    );
-    const pis = pisRes.rows || [];
+    // Get PIs (rows array) — tolerate envs where proforma_invoices might not exist yet
+    let pis = [];
+    try {
+      const pisRes = await query(
+        'SELECT * FROM proforma_invoices WHERE quotation_id = $1 ORDER BY created_at ASC',
+        [quotationId]
+      );
+      pis = pisRes.rows || [];
+    } catch (e) {
+      if (!(e && (e.code === '42P01' || /proforma_invoices/.test(e.message || '')))) {
+        throw e;
+      }
+    }
     
     // Get payment history for this quotation (if payment_history table exists)
     let payments = [];
@@ -454,6 +461,7 @@ class Quotation extends BaseModel {
   }
 
   // Get quotations pending verification for department head
+  // Check for status='pending' AND submitted_for_verification_at IS NOT NULL
   async getPendingVerification() {
     const queryText = `
       SELECT q.*, 
@@ -461,7 +469,8 @@ class Quotation extends BaseModel {
              q.created_by as salesperson_email
       FROM quotations q
       LEFT JOIN quotation_items qi ON q.id = qi.quotation_id
-      WHERE q.status = 'pending_verification'
+      WHERE (q.status = 'pending' OR q.status = 'pending_verification')
+        AND q.submitted_for_verification_at IS NOT NULL
       GROUP BY q.id
       ORDER BY q.submitted_for_verification_at DESC
     `;

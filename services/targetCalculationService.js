@@ -114,10 +114,11 @@ class TargetCalculationService {
 
     if (leadIds.length > 0 && quotationIds.length > 0) {
       query = `
-        SELECT COALESCE(SUM(paid_amount), 0) as total_paid
+        SELECT COALESCE(SUM(installment_amount), 0) as total_paid
         FROM payment_history
-        WHERE paid_amount > 0
+        WHERE installment_amount > 0
           AND (payment_status = 'completed' OR payment_status = 'advance')
+          AND is_refund = false
           AND (
             lead_id = ANY($${paramIndex}::integer[])
             OR quotation_id::text = ANY($${paramIndex + 1}::text[])
@@ -127,20 +128,22 @@ class TargetCalculationService {
       paramIndex += 2;
     } else if (leadIds.length > 0) {
       query = `
-        SELECT COALESCE(SUM(paid_amount), 0) as total_paid
+        SELECT COALESCE(SUM(installment_amount), 0) as total_paid
         FROM payment_history
-        WHERE paid_amount > 0
+        WHERE installment_amount > 0
           AND (payment_status = 'completed' OR payment_status = 'advance')
+          AND is_refund = false
           AND lead_id = ANY($${paramIndex}::integer[])
       `;
       params.push(leadIds);
       paramIndex += 1;
     } else if (quotationIds.length > 0) {
       query = `
-        SELECT COALESCE(SUM(paid_amount), 0) as total_paid
+        SELECT COALESCE(SUM(installment_amount), 0) as total_paid
         FROM payment_history
-        WHERE paid_amount > 0
+        WHERE installment_amount > 0
           AND (payment_status = 'completed' OR payment_status = 'advance')
+          AND is_refund = false
           AND quotation_id::text = ANY($${paramIndex}::text[])
       `;
       params.push(quotationIds);

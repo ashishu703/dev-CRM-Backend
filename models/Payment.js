@@ -1,5 +1,6 @@
 const BaseModel = require('./BaseModel');
 const { query } = require('../config/database');
+const CustomerCredit = require('./CustomerCredit');
 
 class Payment extends BaseModel {
   constructor() {
@@ -44,10 +45,10 @@ class Payment extends BaseModel {
              pi.pi_number,
              pi.id as pi_full_id
       FROM payment_history ph
-      LEFT JOIN quotations q ON ph.quotation_id = q.id
+      LEFT JOIN quotations q ON ph.quotation_id::text = q.id::text
       LEFT JOIN leads l ON ph.lead_id = l.id
-      LEFT JOIN proforma_invoices pi ON ph.pi_id = pi.id
-      WHERE ph.quotation_id = $1 AND ph.is_refund = false
+      LEFT JOIN proforma_invoices pi ON ph.pi_id::text = pi.id::text
+      WHERE ph.quotation_id::text = $1::text AND ph.is_refund = false
       ORDER BY ph.payment_date ASC, ph.installment_number ASC
     `;
     
@@ -120,6 +121,8 @@ class Payment extends BaseModel {
    * @returns {Promise<number>} Credit balance
    */
   async getCreditBalance(leadId) {
+    // Ensure the customer_credits table exists
+    try { await CustomerCredit.ensureSchema(); } catch (_) {}
     const queryText = `
       SELECT COALESCE(balance, 0) as balance
       FROM customer_credits

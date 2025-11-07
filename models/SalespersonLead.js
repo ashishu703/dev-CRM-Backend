@@ -84,7 +84,7 @@ class SalespersonLead extends BaseModel {
       FROM salesperson_leads sl
       JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
       WHERE COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($1))
-      ORDER BY sl.updated_at DESC
+      ORDER BY sl.id ASC
     `;
     const result = await SalespersonLead.query(query, [username]);
     return result.rows || [];

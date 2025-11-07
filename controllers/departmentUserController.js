@@ -1,6 +1,7 @@
 const DepartmentUser = require('../models/DepartmentUser');
 const DepartmentHead = require('../models/DepartmentHead');
 const BaseController = require('./BaseController');
+const TargetCalculationService = require('../services/targetCalculationService');
 
 class DepartmentUserController extends BaseController {
   static async create(req, res) {
@@ -29,6 +30,27 @@ class DepartmentUserController extends BaseController {
       
       if (departmentType && headUser.departmentType !== departmentType) {
         throw new Error('Head user must be from the same department');
+      }
+
+      // Validate target distribution: sum of all user targets should not exceed department head target
+      const userTarget = parseFloat(target || 0);
+      const existingUsers = await DepartmentUser.getByHeadUserId(headUser.id);
+      const totalDistributedTarget = existingUsers.reduce((sum, user) => sum + parseFloat(user.target || 0), 0);
+      const headTarget = parseFloat(headUser.target || 0);
+      const remainingTarget = headTarget - totalDistributedTarget;
+      
+      if (userTarget > remainingTarget) {
+        throw new Error(`Target exceeds available limit. Department head target: ₹${headTarget.toLocaleString('en-IN')}, Already distributed: ₹${totalDistributedTarget.toLocaleString('en-IN')}, Remaining: ₹${remainingTarget.toLocaleString('en-IN')}. You are trying to assign: ₹${userTarget.toLocaleString('en-IN')}`);
+      }
+
+      // Validate target period - user's target period should not exceed department head's period (30 days)
+      if (req.body.targetDurationDays !== undefined) {
+        const userTargetDuration = parseInt(req.body.targetDurationDays);
+        const departmentHeadPeriod = 30; // Department head has 30-day target period
+        
+        if (userTargetDuration > departmentHeadPeriod) {
+          throw new Error(`Target period cannot exceed department head's target period. Maximum allowed: ${departmentHeadPeriod} days, Provided: ${userTargetDuration} days`);
+        }
       }
 
       const userData = {
@@ -65,8 +87,34 @@ class DepartmentUserController extends BaseController {
       const pagination = { page: parseInt(page), limit: parseInt(limit) };
       const result = await DepartmentUser.getWithHeadDetails(effectiveFilters, pagination);
       
+      // Recalculate achieved_target for each user based on their target date range
+      const usersWithRecalculatedTarget = await Promise.all(
+        result.data.map(async (user) => {
+          const userJson = user.toJSON();
+          const targetStartDate = userJson.target_start_date || userJson.targetStartDate;
+          const targetEndDate = userJson.target_end_date || userJson.targetEndDate;
+          
+          // Recalculate achieved_target using target date range
+          const recalculatedAchieved = await TargetCalculationService.calculateAchievedTarget(
+            userJson.id,
+            targetStartDate ? new Date(targetStartDate).toISOString().split('T')[0] : null,
+            targetEndDate ? new Date(targetEndDate).toISOString().split('T')[0] : null
+          );
+          
+          // Update the achieved_target in the user object
+          userJson.achieved_target = recalculatedAchieved;
+          userJson.achievedTarget = recalculatedAchieved;
+          
+          // Update remaining target
+          const target = parseFloat(userJson.target || 0);
+          userJson.remaining_target = target - recalculatedAchieved;
+          
+          return userJson;
+        })
+      );
+      
       return {
-        users: result.data.map(user => user.toJSON()),
+        users: usersWithRecalculatedTarget,
         pagination: result.pagination
       };
     }, 'Department users retrieved successfully', 'Failed to get department users');
@@ -100,19 +148,60 @@ class DepartmentUserController extends BaseController {
       }
 
       // Validate head user if being updated
-      if (updateData.headUserId && updateData.headUserId !== user.headUserId) {
-        const headUser = await DepartmentHead.findById(updateData.headUserId);
+      let headUser = null;
+      // Get the current head_user_id (database returns snake_case)
+      const currentHeadUserId = user.head_user_id || user.headUserId;
+      
+      if (updateData.headUserId && updateData.headUserId !== currentHeadUserId) {
+        headUser = await DepartmentHead.findById(updateData.headUserId);
         if (!headUser) throw new Error('Head user not found');
         
-        const companyName = updateData.companyName || user.companyName;
-        const departmentType = updateData.departmentType || user.departmentType;
+        const companyName = updateData.companyName || user.companyName || user.company_name;
+        const departmentType = updateData.departmentType || user.departmentType || user.department_type;
         
-        if (headUser.companyName !== companyName) {
+        const headCompanyName = headUser.companyName || headUser.company_name;
+        const headDepartmentType = headUser.departmentType || headUser.department_type;
+        
+        if (headCompanyName !== companyName) {
           throw new Error('Head user must be from the same company');
         }
         
-        if (headUser.departmentType !== departmentType) {
+        if (headDepartmentType !== departmentType) {
           throw new Error('Head user must be from the same department');
+        }
+      } else {
+        // Get the current head user
+        if (!currentHeadUserId) {
+          throw new Error('Department user does not have an assigned head user');
+        }
+        headUser = await DepartmentHead.findById(currentHeadUserId);
+        if (!headUser) throw new Error('Head user not found');
+      }
+
+      // Validate target distribution if target is being updated
+      if (updateData.target !== undefined) {
+        const newUserTarget = parseFloat(updateData.target || 0);
+        const existingUsers = await DepartmentUser.getByHeadUserId(headUser.id);
+        const totalDistributedTarget = existingUsers.reduce((sum, u) => {
+          // Exclude current user's target from the sum
+          if (u.id === user.id) return sum;
+          return sum + parseFloat(u.target || 0);
+        }, 0);
+        const headTarget = parseFloat(headUser.target || 0);
+        const remainingTarget = headTarget - totalDistributedTarget;
+        
+        if (newUserTarget > remainingTarget) {
+          throw new Error(`Target exceeds available limit. Department head target: ₹${headTarget.toLocaleString('en-IN')}, Already distributed: ₹${totalDistributedTarget.toLocaleString('en-IN')}, Remaining: ₹${remainingTarget.toLocaleString('en-IN')}. You are trying to assign: ₹${newUserTarget.toLocaleString('en-IN')}`);
+        }
+      }
+
+      // Validate target period - user's target period should not exceed department head's period (30 days)
+      if (updateData.targetDurationDays !== undefined) {
+        const userTargetDuration = parseInt(updateData.targetDurationDays);
+        const departmentHeadPeriod = 30; // Department head has 30-day target period
+        
+        if (userTargetDuration > departmentHeadPeriod) {
+          throw new Error(`Target period cannot exceed department head's target period. Maximum allowed: ${departmentHeadPeriod} days, Provided: ${userTargetDuration} days`);
         }
       }
 
@@ -136,7 +225,34 @@ class DepartmentUserController extends BaseController {
     await BaseController.handleAsyncOperation(res, async () => {
       const { headUserId } = req.params;
       const users = await DepartmentUser.getByHeadUserId(headUserId);
-      return { users: users.map(user => user.toJSON()) };
+      
+      // Recalculate achieved_target for each user based on their target date range
+      const usersWithRecalculatedTarget = await Promise.all(
+        users.map(async (user) => {
+          const userJson = user.toJSON();
+          const targetStartDate = userJson.target_start_date || userJson.targetStartDate;
+          const targetEndDate = userJson.target_end_date || userJson.targetEndDate;
+          
+          // Recalculate achieved_target using target date range
+          const recalculatedAchieved = await TargetCalculationService.calculateAchievedTarget(
+            userJson.id,
+            targetStartDate ? new Date(targetStartDate).toISOString().split('T')[0] : null,
+            targetEndDate ? new Date(targetEndDate).toISOString().split('T')[0] : null
+          );
+          
+          // Update the achieved_target in the user object
+          userJson.achieved_target = recalculatedAchieved;
+          userJson.achievedTarget = recalculatedAchieved;
+          
+          // Update remaining target
+          const target = parseFloat(userJson.target || 0);
+          userJson.remaining_target = target - recalculatedAchieved;
+          
+          return userJson;
+        })
+      );
+      
+      return { users: usersWithRecalculatedTarget };
     }, 'Users under head retrieved successfully', 'Failed to get users under head');
   }
 
