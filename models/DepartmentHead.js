@@ -94,6 +94,20 @@ class DepartmentHead extends BaseModel {
     return result.rows.map(row => new this(row));
   }
 
+  // Get total target distributed to all users under this department head
+  async getTotalDistributedTarget() {
+    const DepartmentUser = require('./DepartmentUser');
+    const users = await DepartmentUser.getByHeadUserId(this.id);
+    return users.reduce((sum, user) => sum + parseFloat(user.target || 0), 0);
+  }
+
+  // Get remaining target that can be distributed
+  async getRemainingTarget() {
+    const headTarget = parseFloat(this.target || 0);
+    const distributed = await this.getTotalDistributedTarget();
+    return Math.max(0, headTarget - distributed);
+  }
+
   static validateData({ username, email, departmentType, companyName, target }) {
     if (!companyName || typeof companyName !== 'string') {
       throw new Error('Company name is required');
@@ -113,7 +127,24 @@ class DepartmentHead extends BaseModel {
     if (updateData.email !== undefined) mapped.email = updateData.email;
     if (updateData.departmentType !== undefined) mapped.department_type = updateData.departmentType;
     if (updateData.companyName !== undefined) mapped.company_name = updateData.companyName;
-    if (updateData.target !== undefined) mapped.target = updateData.target;
+    
+    // Handle both target and monthlyTarget (monthlyTarget takes precedence if both are provided)
+    const targetUpdated = updateData.monthlyTarget !== undefined || updateData.target !== undefined;
+    if (updateData.monthlyTarget !== undefined) {
+      mapped.target = typeof updateData.monthlyTarget === 'string' 
+        ? parseFloat(updateData.monthlyTarget) 
+        : updateData.monthlyTarget;
+    } else if (updateData.target !== undefined) {
+      mapped.target = typeof updateData.target === 'string' 
+        ? parseFloat(updateData.target) 
+        : updateData.target;
+    }
+    
+    // Set target_start_date when target is updated (new monthly target assignment)
+    if (targetUpdated) {
+      mapped.target_start_date = new Date().toISOString();
+    }
+    
     if (updateData.isActive !== undefined) mapped.is_active = updateData.isActive;
     if (updateData.emailVerified !== undefined) mapped.email_verified = updateData.emailVerified;
 
@@ -123,6 +154,24 @@ class DepartmentHead extends BaseModel {
     }
 
     return await super.update(this.constructor.TABLE_NAME, mapped, updatedBy);
+  }
+
+  // Check if target is expired (30 days from target_start_date)
+  isTargetExpired() {
+    if (!this.target_start_date) return false;
+    const startDate = new Date(this.target_start_date);
+    const now = new Date();
+    const daysDiff = Math.floor((now - startDate) / (1000 * 60 * 60 * 24));
+    return daysDiff > 30;
+  }
+
+  // Get days remaining until target expires
+  getTargetDaysRemaining() {
+    if (!this.target_start_date) return null;
+    const startDate = new Date(this.target_start_date);
+    const now = new Date();
+    const daysDiff = Math.floor((now - startDate) / (1000 * 60 * 60 * 24));
+    return Math.max(0, 30 - daysDiff);
   }
 
   async delete() {
@@ -151,6 +200,24 @@ class DepartmentHead extends BaseModel {
     );
     if (result.rows.length > 0) this.password = result.rows[0].password;
     return this;
+  }
+
+  toJSON() {
+    const json = { ...this };
+    delete json.password;
+    
+    // Add target expiration information
+    if (this.target_start_date) {
+      json.targetExpired = this.isTargetExpired();
+      json.targetDaysRemaining = this.getTargetDaysRemaining();
+      json.targetStartDate = this.target_start_date;
+    } else {
+      json.targetExpired = false;
+      json.targetDaysRemaining = null;
+      json.targetStartDate = null;
+    }
+    
+    return json;
   }
 }
 

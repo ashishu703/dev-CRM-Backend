@@ -68,8 +68,25 @@ class DepartmentHeadController extends BaseController {
       const { id } = req.params;
       const updateData = req.body;
       
+      if (updateData.monthlyTarget !== undefined && updateData.target === undefined) {
+        updateData.target = typeof updateData.monthlyTarget === 'string' 
+          ? parseFloat(updateData.monthlyTarget) 
+          : updateData.monthlyTarget;
+        delete updateData.monthlyTarget;
+      }
+      
       const user = await DepartmentHead.findById(id);
       if (!user) throw new Error('Department head not found');
+
+      // Check if target is being updated
+      const isTargetUpdate = updateData.target !== undefined || updateData.monthlyTarget !== undefined;
+      
+      // If target is being updated and current target is not expired, allow update (user can reassign anytime)
+      // But show expiration status in response
+      if (isTargetUpdate && user.target_start_date && !user.isTargetExpired()) {
+        // Target is still active, but allow update to reassign (this will reset the 30-day period)
+        // This is allowed as per user requirement to reassign after expiration
+      }
 
       if (updateData.email && updateData.email !== user.email) {
         const existingUser = await DepartmentHead.findByEmail(updateData.email);

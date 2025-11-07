@@ -16,8 +16,21 @@ const updateHeadSchema = Joi.object({
   departmentType: Joi.string().valid('marketing_sales', 'office_sales', 'hr').optional(),
   companyName: Joi.string().min(1).max(255).optional(),
   target: Joi.number().min(0).optional(),
+  monthlyTarget: Joi.alternatives().try(
+    Joi.number().min(0),
+    Joi.string().pattern(/^\d+(\.\d+)?$/).custom((value) => parseFloat(value))
+  ).optional(),
   isActive: Joi.boolean().optional(),
   emailVerified: Joi.boolean().optional()
+}).custom((value, helpers) => {
+  // If monthlyTarget is provided, map it to target
+  if (value.monthlyTarget !== undefined) {
+    value.target = typeof value.monthlyTarget === 'string' 
+      ? parseFloat(value.monthlyTarget) 
+      : value.monthlyTarget;
+    delete value.monthlyTarget;
+  }
+  return value;
 });
 
 const updateStatusSchema = Joi.object({

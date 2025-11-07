@@ -44,17 +44,24 @@ class PaymentController {
         lead = leadRes.rows[0] || null;
       }
 
-      // Get quotation if provided
+      // Helper to validate UUIDs
+      const isUuid = (v) => typeof v === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(v);
+
+      // Normalize identifiers expected to be UUIDs
+      const safeQuotationId = isUuid(quotation_id) ? quotation_id : null;
+      const safePiId = isUuid(pi_id) ? pi_id : null;
+
+      // Get quotation if provided and is a valid UUID
       let quotation = null;
       let quotationTotal = 0;
       let paidSoFar = 0;
       let remainingBefore = 0;
       let installmentNumber = 1;
 
-      if (quotation_id) {
+      if (safeQuotationId) {
         const quotRes = await client.query(
           'SELECT * FROM quotations WHERE id = $1',
-          [quotation_id]
+          [safeQuotationId]
         );
         quotation = quotRes.rows[0];
         
@@ -73,7 +80,7 @@ class PaymentController {
           `SELECT COALESCE(SUM(installment_amount), 0) as paid
            FROM payment_history
            WHERE quotation_id = $1 AND payment_status = 'completed' AND is_refund = false`,
-          [quotation_id]
+          [safeQuotationId]
         );
         paidSoFar = Number(paidRes.rows[0].paid);
         remainingBefore = Math.max(0, quotationTotal - paidSoFar);
@@ -83,7 +90,7 @@ class PaymentController {
           `SELECT COALESCE(MAX(installment_number), 0) + 1 as next_num
            FROM payment_history
            WHERE quotation_id = $1`,
-          [quotation_id]
+          [safeQuotationId]
         );
         installmentNumber = instRes.rows[0].next_num;
       }
@@ -93,11 +100,11 @@ class PaymentController {
       let overpaidAmount = 0;
       let remainingAfter = 0;
 
-      if (quotation_id && remainingBefore > 0) {
+      if (safeQuotationId && remainingBefore > 0) {
         appliedToQuotation = Math.min(installmentAmt, remainingBefore);
         overpaidAmount = Math.max(0, installmentAmt - appliedToQuotation);
         remainingAfter = remainingBefore - appliedToQuotation;
-      } else if (!quotation_id) {
+      } else if (!safeQuotationId) {
         // No quotation: entire amount goes to credit
         overpaidAmount = installmentAmt;
         remainingAfter = 0;
@@ -192,8 +199,8 @@ class PaymentController {
         quotation?.items?.[0]?.description || lead.product_type,
         lead.business || lead.business_type,
         lead.address,
-        quotation_id || null,
-        pi_id || null,
+        safeQuotationId,
+        safePiId,
         quotationTotal,
         totalPaidAfter,
         remainingAfter,
@@ -212,10 +219,10 @@ class PaymentController {
       ]);
 
       // Update quotation status if fully paid
-      if (quotation_id && remainingAfter === 0 && quotation.status !== 'completed') {
+      if (safeQuotationId && remainingAfter === 0 && quotation.status !== 'completed') {
         await client.query(
           `UPDATE quotations SET status = 'completed', updated_at = NOW() WHERE id = $1`,
-          [quotation_id]
+          [safeQuotationId]
         );
       }
 
@@ -454,9 +461,9 @@ class PaymentController {
           pi.pi_number,
           pi.id as pi_full_id
         FROM payment_history ph
-        LEFT JOIN leads l ON ph.lead_id = l.id
-        LEFT JOIN quotations q ON ph.quotation_id = q.id
-        LEFT JOIN proforma_invoices pi ON ph.pi_id = pi.id
+        LEFT JOIN leads l ON ph.lead_id::text = l.id::text
+        LEFT JOIN quotations q ON ph.quotation_id::text = q.id::text
+        LEFT JOIN proforma_invoices pi ON ph.pi_id::text = pi.id::text
         ${whereClause}
         ORDER BY ph.payment_date DESC, ph.created_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}

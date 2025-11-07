@@ -424,18 +424,16 @@ class QuotationController {
     }
   }
 
-  // Bulk fetch quotations with payments for salesperson's customers
   async getBulkWithPayments(req, res) {
     try {
       const salespersonId = req.user.id;
       
-      // Fetch all approved quotations for salesperson's customers in one query
       const quotationsQuery = `
         SELECT 
           q.*
         FROM quotations q
         WHERE q.salesperson_id = $1 
-          AND q.status = 'approved'
+          AND q.status IN ('approved','pending_approval','rejected')
         ORDER BY q.created_at DESC
       `;
       

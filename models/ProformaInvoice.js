@@ -6,8 +6,125 @@ class ProformaInvoice extends BaseModel {
     super('proforma_invoices');
   }
 
+  async ensureSchema() {
+    const sql = `
+      DO $do$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'proforma_invoices'
+        ) THEN
+          CREATE TABLE proforma_invoices (
+            id SERIAL PRIMARY KEY,
+            pi_number VARCHAR(50) UNIQUE NOT NULL,
+            quotation_id TEXT,
+            customer_id TEXT,
+            salesperson_id TEXT,
+            pi_date DATE,
+            valid_until DATE,
+            status VARCHAR(50) DEFAULT 'draft',
+            subtotal NUMERIC(12,2) DEFAULT 0,
+            tax_amount NUMERIC(12,2) DEFAULT 0,
+            total_amount NUMERIC(12,2) DEFAULT 0,
+            total_paid NUMERIC(12,2) DEFAULT 0,
+            remaining_balance NUMERIC(12,2) DEFAULT 0,
+            dispatch_mode VARCHAR(50),
+            transport_name VARCHAR(255),
+            vehicle_number VARCHAR(100),
+            transport_id INTEGER,
+            lr_no VARCHAR(100),
+            courier_name VARCHAR(255),
+            consignment_no VARCHAR(100),
+            by_hand VARCHAR(255),
+            post_service VARCHAR(255),
+            carrier_name VARCHAR(255),
+            carrier_number VARCHAR(100),
+            created_by VARCHAR(255),
+            sent_to_customer_at TIMESTAMP NULL,
+            customer_accepted_at TIMESTAMP NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_pi_quotation ON proforma_invoices(quotation_id);
+          CREATE INDEX IF NOT EXISTS idx_pi_customer ON proforma_invoices(customer_id);
+          CREATE INDEX IF NOT EXISTS idx_pi_number ON proforma_invoices(pi_number);
+        END IF;
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END
+      $do$;
+      DO $do$
+      BEGIN
+        -- Ensure quotation_id is text to accept UUIDs
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'proforma_invoices' AND column_name = 'quotation_id'
+          ) THEN
+            -- Attempt type change only if not already text/character varying/uuid
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns 
+              WHERE table_schema = 'public' AND table_name = 'proforma_invoices' AND column_name = 'quotation_id'
+                AND data_type NOT IN ('text','character varying','uuid')
+            ) THEN
+              ALTER TABLE proforma_invoices 
+                ALTER COLUMN quotation_id TYPE TEXT USING quotation_id::text;
+            END IF;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        -- Migrate customer_id and salesperson_id to TEXT to support UUIDs
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'proforma_invoices' AND column_name = 'customer_id'
+          ) THEN
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns 
+              WHERE table_schema = 'public' AND table_name = 'proforma_invoices' AND column_name = 'customer_id'
+                AND data_type NOT IN ('text','character varying','uuid')
+            ) THEN
+              ALTER TABLE proforma_invoices 
+                ALTER COLUMN customer_id TYPE TEXT USING customer_id::text;
+            END IF;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        BEGIN
+          IF EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'proforma_invoices' AND column_name = 'salesperson_id'
+          ) THEN
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns 
+              WHERE table_schema = 'public' AND table_name = 'proforma_invoices' AND column_name = 'salesperson_id'
+                AND data_type NOT IN ('text','character varying','uuid')
+            ) THEN
+              ALTER TABLE proforma_invoices 
+                ALTER COLUMN salesperson_id TYPE TEXT USING salesperson_id::text;
+            END IF;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        CREATE OR REPLACE FUNCTION update_pi_updated_at()
+        RETURNS TRIGGER AS $pi$
+        BEGIN
+          NEW.updated_at = CURRENT_TIMESTAMP;
+          RETURN NEW;
+        END;
+        $pi$ LANGUAGE plpgsql;
+        DROP TRIGGER IF EXISTS trg_pi_updated_at ON proforma_invoices;
+        CREATE TRIGGER trg_pi_updated_at
+        BEFORE UPDATE ON proforma_invoices
+        FOR EACH ROW EXECUTE FUNCTION update_pi_updated_at();
+      EXCEPTION WHEN OTHERS THEN NULL;
+      END
+      $do$;
+    `;
+    await query(sql);
+  }
+
   // Create PI from quotation
   async createFromQuotation(quotationId, piData) {
+    await this.ensureSchema();
     const client = await getClient();
     
     try {
@@ -82,6 +199,7 @@ class ProformaInvoice extends BaseModel {
 
   // Update PI by ID
   async updateById(id, updateData) {
+    await this.ensureSchema();
     const fields = [];
     const values = [];
     let paramCount = 1;
@@ -184,6 +302,7 @@ class ProformaInvoice extends BaseModel {
 
   // Get PIs by customer
   async getByCustomer(customerId) {
+    await this.ensureSchema();
     const sql = `
       SELECT pi.*, 
              q.quotation_number,
@@ -193,7 +312,7 @@ class ProformaInvoice extends BaseModel {
       FROM proforma_invoices pi
       LEFT JOIN quotations q ON pi.quotation_id = q.id
       LEFT JOIN payment_history ph ON pi.quotation_id = ph.quotation_id AND ph.payment_status = 'completed' AND ph.is_refund = false
-      WHERE pi.customer_id = $1
+      WHERE pi.customer_id::text = $1::text
       GROUP BY pi.id, q.quotation_number, q.customer_name
       ORDER BY pi.created_at DESC
     `;
@@ -204,6 +323,7 @@ class ProformaInvoice extends BaseModel {
 
   // Generate PI number
   async generatePINumber() {
+    await this.ensureSchema();
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
     
@@ -231,6 +351,7 @@ class ProformaInvoice extends BaseModel {
 
   // Get PI with payments
   async getWithPayments(id) {
+    await this.ensureSchema();
     const sql = 'SELECT * FROM proforma_invoices WHERE id = $1';
     const result = await query(sql, [id]);
     const pi = result.rows[0];
@@ -247,6 +368,7 @@ class ProformaInvoice extends BaseModel {
 
   // Get PIs by quotation
   async getByQuotation(quotationId) {
+    await this.ensureSchema();
     const sql = 'SELECT * FROM proforma_invoices WHERE quotation_id = $1 ORDER BY created_at DESC';
     const result = await query(sql, [quotationId]);
     return result.rows;
@@ -254,6 +376,7 @@ class ProformaInvoice extends BaseModel {
 
   // Get PI by ID
   async getById(id) {
+    await this.ensureSchema();
     const sql = 'SELECT * FROM proforma_invoices WHERE id = $1';
     const result = await query(sql, [id]);
     return result.rows[0];
@@ -261,12 +384,13 @@ class ProformaInvoice extends BaseModel {
 
   // Get all PIs (approved, rejected, pending)
   async getAll() {
+    await this.ensureSchema();
     const sql = `
       SELECT pi.*, 
              dh.customer AS customer_name,
              dh.business AS customer_business
       FROM proforma_invoices pi
-      LEFT JOIN department_head_leads dh ON pi.customer_id = dh.id
+      LEFT JOIN department_head_leads dh ON pi.customer_id::text = dh.id::text
       ORDER BY 
         CASE 
           WHEN pi.status = 'pending_approval' THEN 1
@@ -282,12 +406,13 @@ class ProformaInvoice extends BaseModel {
 
   // Get all PIs pending approval
   async getPendingApproval() {
+    await this.ensureSchema();
     const sql = `
       SELECT pi.*, 
              dh.customer AS customer_name,
              dh.business AS customer_business
       FROM proforma_invoices pi
-      LEFT JOIN department_head_leads dh ON pi.customer_id = dh.id
+      LEFT JOIN department_head_leads dh ON pi.customer_id::text = dh.id::text
       WHERE pi.status = 'pending_approval'
       ORDER BY pi.created_at DESC
     `;
@@ -297,6 +422,7 @@ class ProformaInvoice extends BaseModel {
 
   // Delete PI by ID
   async deleteById(id) {
+    await this.ensureSchema();
     const sql = 'DELETE FROM proforma_invoices WHERE id = $1 RETURNING *';
     const result = await query(sql, [id]);
     return result.rows[0];

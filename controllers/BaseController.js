@@ -13,7 +13,8 @@ class BaseController {
     logger.error(`${this.constructor.name} error:`, error);
     res.status(statusCode).json({
       success: false,
-      error: message
+      error: message,
+      message: message // Also include as 'message' for frontend compatibility
     });
   }
 
@@ -29,7 +30,10 @@ class BaseController {
       const result = await operation();
       this.handleResponse(res, result, successMessage);
     } catch (error) {
-      this.handleError(res, error, errorMessage);
+      // Use the actual error message if available, otherwise use the default error message
+      const message = error?.message || errorMessage;
+      const statusCode = error?.statusCode || 400; // Use 400 for validation errors, 500 for server errors
+      this.handleError(res, error, message, statusCode);
     }
   }
 }

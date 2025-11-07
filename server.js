@@ -37,18 +37,26 @@ app.use(cors(corsOptions));
 // Handle CORS preflight requests explicitly
 app.options('*', cors(corsOptions));
 
-// Rate limiting
+// Rate limiting - increased limit for development to prevent IP blocking during testing
+const isDevelopment = (process.env.NODE_ENV || 'development') !== 'production';
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  // Much higher limit for development (1000), normal limit for production (100)
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (isDevelopment ? 1000 : 100),
   standardHeaders: true,
   legacyHeaders: false,
   // Skip limiting for local development and localhost IPs
   skip: (req) => {
-    const isLocalEnv = (process.env.NODE_ENV || 'development') !== 'production';
-    const ip = req.ip || '';
-    const isLocalIp = ip === '::1' || ip === '127.0.0.1' || ip.startsWith('::ffff:127.0.0.1');
-    return isLocalEnv || isLocalIp;
+    const ip = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.headers['x-real-ip'] || '';
+    const isLocalIp = 
+      ip === '::1' || 
+      ip === '127.0.0.1' || 
+      ip === 'localhost' ||
+      ip.startsWith('::ffff:127.0.0.1') ||
+      ip.startsWith('127.') ||
+      ip.startsWith('192.168.') ||
+      ip.startsWith('10.');
+    return isDevelopment || isLocalIp;
   },
   message: {
     error: 'Too many requests from this IP, please try again later.'

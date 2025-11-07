@@ -5,6 +5,13 @@ class DepartmentHeadLead extends BaseModel {
     super('department_head_leads');
   }
 
+  // Generate customer ID if not provided
+  generateCustomerId() {
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    return `CUST-${timestamp}${random}`;
+  }
+
   async createFromUi(uiLead, createdBy) {
     // Prevent duplicates per creator by phone
     if (uiLead.phone) {
@@ -27,8 +34,11 @@ class DepartmentHeadLead extends BaseModel {
       RETURNING id
     `;
 
+    // Generate customer_id if not provided
+    const customerId = uiLead.customerId || this.generateCustomerId();
+
     const values = [
-      uiLead.customerId || null,
+      customerId,
       uiLead.customer || null,
       uiLead.email || null,
       uiLead.business || null,
@@ -68,11 +78,20 @@ class DepartmentHeadLead extends BaseModel {
     }
 
     const filteredRows = rows.filter(r => {
+      const name = (r.customer || '').toString().trim();
       const p = (r.phone || '').toString().trim();
-      return p.length === 0 || !existingPhoneSet.has(p);
+      // Skip rows that are effectively empty (no name and no phone)
+      if (name.length === 0 && p.length === 0) return false;
+      // If phone exists, drop duplicates for this creator
+      if (p.length > 0 && existingPhoneSet.has(p)) return false;
+      return true;
     });
     if (filteredRows.length === 0) {
-      return { rowCount: 0, rows: [] };
+      const duplicatesCount = rows.filter(r => {
+        const p = (r.phone || '').toString().trim();
+        return p.length > 0 && existingPhoneSet.has(p);
+      }).length;
+      return { rowCount: 0, rows: [], duplicatesCount };
     }
     let i = 1;
     const placeholders = filteredRows.map(() =>
@@ -91,7 +110,7 @@ class DepartmentHeadLead extends BaseModel {
     `;
 
     const values = filteredRows.flatMap((r) => [
-      r.customerId || null,
+      r.customerId || this.generateCustomerId(),
       r.customer || null,
       r.email || null,
       r.business || null,
@@ -113,7 +132,9 @@ class DepartmentHeadLead extends BaseModel {
       r.assignedTelecaller || null,
       createdBy
     ]);
-    return DepartmentHeadLead.query(query, values);
+    const insertResult = await DepartmentHeadLead.query(query, values);
+    const duplicatesCount = rows.length - filteredRows.length;
+    return { rowCount: insertResult.rowCount, rows: insertResult.rows, duplicatesCount };
   }
 
   async getAll(filters = {}, pagination = {}) {
@@ -171,8 +192,8 @@ class DepartmentHeadLead extends BaseModel {
       query += ` WHERE ${conditions.join(' AND ')}`;
     }
 
-    // Add ORDER BY
-    query += ` ORDER BY dhl.created_at DESC`;
+    // Add ORDER BY (oldest first as requested)
+    query += ` ORDER BY dhl.created_at ASC`;
 
     // Add pagination
     if (pagination.limit) {
