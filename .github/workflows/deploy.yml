@@ -25,12 +25,12 @@ jobs:
           ssh -i ~/.ssh/id_rsa -tt root@${{ secrets.SERVER_IP }} " \
             set -e; \
             cd /var/www/myapp; \
-            echo 'Manually deleting corrupt .env file...'; \
+            echo 'FORCE DELETING corrupt .env file from server...'; \
             rm -f /var/www/myapp/.env; \
             echo 'Fetching latest code from git...'; \
             git fetch origin master; \
             git reset --hard origin/master; \
-            echo 'Starting containers...'; \
+            echo 'Starting containers with new, clean files...'; \
             docker compose down; \
             docker compose up -d --build; \
             echo 'Deployment successful!'; \
