@@ -241,7 +241,11 @@ class QuotationController {
   // Get quotations pending verification (for department head)
   async getPendingVerification(req, res) {
     try {
-      const quotations = await Quotation.getPendingVerification();
+      // STRICT CHECK: Filter by logged-in user's department and company
+      const quotations = await Quotation.getPendingVerification(
+        req.user.departmentType,
+        req.user.companyName
+      );
       
       res.json({
         success: true,
@@ -261,7 +265,13 @@ class QuotationController {
   async getByStatus(req, res) {
     try {
       const { status } = req.params;
-      const quotations = await Quotation.getByStatus(status);
+      
+      // STRICT CHECK: Filter by logged-in user's department and company
+      const quotations = await Quotation.getByStatus(
+        status,
+        req.user.departmentType,
+        req.user.companyName
+      );
       
       res.json({
         success: true,

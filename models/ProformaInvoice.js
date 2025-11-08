@@ -383,14 +383,35 @@ class ProformaInvoice extends BaseModel {
   }
 
   // Get all PIs (approved, rejected, pending)
-  async getAll() {
+  async getAll(departmentType = null, companyName = null) {
     await this.ensureSchema();
-    const sql = `
+    let sql = `
       SELECT pi.*, 
-             dh.customer AS customer_name,
-             dh.business AS customer_business
+             dhl.customer AS customer_name,
+             dhl.business AS customer_business
       FROM proforma_invoices pi
-      LEFT JOIN department_head_leads dh ON pi.customer_id::text = dh.id::text
+      LEFT JOIN department_head_leads dhl ON pi.customer_id::text = dhl.id::text
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE 1=1
+    `;
+    
+    const values = [];
+    let paramCount = 1;
+
+    // STRICT CHECK: Filter by department type if provided
+    if (departmentType) {
+      sql += ` AND dh.department_type = $${paramCount}`;
+      values.push(departmentType);
+      paramCount++;
+    }
+
+    // STRICT CHECK: Filter by company name if provided
+    if (companyName) {
+      sql += ` AND dh.company_name = $${paramCount}`;
+      values.push(companyName);
+    }
+
+    sql += `
       ORDER BY 
         CASE 
           WHEN pi.status = 'pending_approval' THEN 1
@@ -400,7 +421,8 @@ class ProformaInvoice extends BaseModel {
         END,
         pi.created_at DESC
     `;
-    const result = await query(sql);
+    
+    const result = await query(sql, values);
     return result.rows;
   }
 
