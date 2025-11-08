@@ -9,12 +9,10 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4500
-      # --- THIS IS THE CRITICAL FIX ---
-      - ALLOWED_ORIGINS=http://62.72.12.249:8080
-      # Trusted IPs to bypass rate limiting (comma-separated)
+      # TRUSTED_IPS wali line sahi hai, isse rehne dein
       - TRUSTED_IPS=62.72.12.249
     env_file:
-      - .env
+      - .env  # Ab backend yahan se 'ALLOWED_ORIGINS' ki sahi value uthayega
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
