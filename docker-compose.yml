@@ -11,6 +11,8 @@ services:
       - PORT=4500
       # --- THIS IS THE CRITICAL FIX ---
       - ALLOWED_ORIGINS=http://62.72.12.249:8080
+      # Trusted IPs to bypass rate limiting (comma-separated)
+      - TRUSTED_IPS=62.72.12.249
     env_file:
       - .env
     volumes:
