@@ -150,13 +150,35 @@ class DepartmentHeadLead extends BaseModel {
         sl.sales_status_remark AS sales_status_remark
       FROM department_head_leads dhl
       LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
     `;
     
     const conditions = [];
     const values = [];
     let paramCount = 1;
 
-    // Add filters
+    // STRICT CHECK: Always filter by created_by (email) - mandatory
+    if (filters.createdBy) {
+      conditions.push(`dhl.created_by = $${paramCount}`);
+      values.push(filters.createdBy);
+      paramCount++;
+    }
+
+    // STRICT CHECK: Filter by department type if provided
+    if (filters.departmentType) {
+      conditions.push(`dh.department_type = $${paramCount}`);
+      values.push(filters.departmentType);
+      paramCount++;
+    }
+
+    // STRICT CHECK: Filter by company name if provided
+    if (filters.companyName) {
+      conditions.push(`dh.company_name = $${paramCount}`);
+      values.push(filters.companyName);
+      paramCount++;
+    }
+
+    // Add other filters
     if (filters.search) {
       conditions.push(`(dhl.customer ILIKE $${paramCount} OR dhl.email ILIKE $${paramCount} OR dhl.business ILIKE $${paramCount})`);
       values.push(`%${filters.search}%`);
@@ -178,12 +200,6 @@ class DepartmentHeadLead extends BaseModel {
     if (filters.salesStatus) {
       conditions.push(`dhl.sales_status = $${paramCount}`);
       values.push(filters.salesStatus);
-      paramCount++;
-    }
-
-    if (filters.createdBy) {
-      conditions.push(`dhl.created_by = $${paramCount}`);
-      values.push(filters.createdBy);
       paramCount++;
     }
 
@@ -212,8 +228,8 @@ class DepartmentHeadLead extends BaseModel {
     return result.rows || [];
   }
 
-  async getById(id) {
-    const query = `
+  async getById(id, userEmail = null, departmentType = null, companyName = null) {
+    let query = `
       SELECT 
         dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, dhl.product_names, dhl.category,
         dhl.sales_status, dhl.created, dhl.telecaller_status, dhl.payment_status,
@@ -222,16 +238,42 @@ class DepartmentHeadLead extends BaseModel {
         dhl.created_by, dhl.created_at, dhl.updated_at,
         sl.follow_up_status AS follow_up_status,
         sl.follow_up_remark AS follow_up_remark,
-        sl.sales_status_remark AS sales_status_remark
+        sl.sales_status_remark AS sales_status_remark,
+        dh.department_type AS creator_department_type,
+        dh.company_name AS creator_company_name
       FROM department_head_leads dhl
       LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE dhl.id = $1
     `;
-    const result = await DepartmentHeadLead.query(query, [id]);
+    
+    const values = [id];
+    let paramCount = 2;
+
+    // STRICT CHECK: Verify ownership if user info is provided
+    if (userEmail) {
+      query += ` AND dhl.created_by = $${paramCount}`;
+      values.push(userEmail);
+      paramCount++;
+    }
+
+    if (departmentType) {
+      query += ` AND dh.department_type = $${paramCount}`;
+      values.push(departmentType);
+      paramCount++;
+    }
+
+    if (companyName) {
+      query += ` AND dh.company_name = $${paramCount}`;
+      values.push(companyName);
+      paramCount++;
+    }
+
+    const result = await DepartmentHeadLead.query(query, values);
     return result.rows && result.rows[0] ? result.rows[0] : null;
   }
 
-  async updateById(id, updateData) {
+  async updateById(id, updateData, userEmail = null, departmentType = null, companyName = null) {
     const allowedFields = [
       'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
       'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
@@ -267,16 +309,38 @@ class DepartmentHeadLead extends BaseModel {
       return { rowCount: 0 };
     }
 
-    const query = `
-      UPDATE department_head_leads
+    // STRICT CHECK: Add ownership verification in WHERE clause
+    let query = `
+      UPDATE department_head_leads dhl
       SET ${updates.join(', ')}, updated_at = NOW()
-      WHERE id = $${paramCount}
+      FROM department_heads dh
+      WHERE dhl.id = $${paramCount} AND dh.email = dhl.created_by
     `;
     values.push(id);
+    paramCount++;
+
+    if (userEmail) {
+      query += ` AND dhl.created_by = $${paramCount}`;
+      values.push(userEmail);
+      paramCount++;
+    }
+
+    if (departmentType) {
+      query += ` AND dh.department_type = $${paramCount}`;
+      values.push(departmentType);
+      paramCount++;
+    }
+
+    if (companyName) {
+      query += ` AND dh.company_name = $${paramCount}`;
+      values.push(companyName);
+      paramCount++;
+    }
+
     return await DepartmentHeadLead.query(query, values);
   }
 
-  async updateManyForCreator(ids, updateData, createdBy) {
+  async updateManyForCreator(ids, updateData, createdBy, departmentType = null, companyName = null) {
     if (!Array.isArray(ids) || ids.length === 0) return { rowCount: 0 };
     const allowedFields = [
       'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
@@ -311,35 +375,75 @@ class DepartmentHeadLead extends BaseModel {
 
     if (updates.length === 0) return { rowCount: 0 };
 
-    const idPlaceholders = ids.map((_id, idx) => `$${paramCount + idx}`).join(',');
-    const createdByIdx = paramCount + ids.length;
+    // Calculate parameter indices correctly
+    // paramCount is already at the next available index after updates
+    const idStartIdx = paramCount;
+    const idPlaceholders = ids.map((_id, idx) => `$${idStartIdx + idx}`).join(',');
+    const createdByIdx = idStartIdx + ids.length;
+    let nextParamIdx = createdByIdx + 1;
 
-    const query = `
-      UPDATE department_head_leads
+    // STRICT CHECK: Add department and company verification via JOIN
+    let query = `
+      UPDATE department_head_leads dhl
       SET ${updates.join(', ')}, updated_at = NOW()
-      WHERE id IN (${idPlaceholders}) AND created_by = $${createdByIdx}
+      FROM department_heads dh
+      WHERE dhl.id IN (${idPlaceholders}) 
+        AND dhl.created_by = $${createdByIdx}
+        AND dh.email = dhl.created_by
     `;
+    
+    // Push ids and createdBy first
     values.push(...ids, createdBy);
+
+    // Add department type check if provided
+    if (departmentType) {
+      query += ` AND dh.department_type = $${nextParamIdx}`;
+      values.push(departmentType);
+      nextParamIdx++;
+    }
+
+    // Add company name check if provided
+    if (companyName) {
+      query += ` AND dh.company_name = $${nextParamIdx}`;
+      values.push(companyName);
+    }
+
     return await DepartmentHeadLead.query(query, values);
   }
 
-  async getStats(createdBy) {
-    const query = `
+  async getStats(createdBy, departmentType = null, companyName = null) {
+    let query = `
       SELECT
         COUNT(*) as total,
-        COUNT(CASE WHEN sales_status = 'PENDING' THEN 1 END) as pending,
-        COUNT(CASE WHEN sales_status = 'IN_PROGRESS' THEN 1 END) as in_progress,
-        COUNT(CASE WHEN sales_status = 'COMPLETED' THEN 1 END) as completed,
-        COUNT(CASE WHEN telecaller_status = 'ACTIVE' THEN 1 END) as active_telecallers,
-        COUNT(CASE WHEN telecaller_status = 'INACTIVE' THEN 1 END) as inactive_telecallers,
-        COUNT(CASE WHEN payment_status = 'PENDING' THEN 1 END) as pending_payments,
-        COUNT(CASE WHEN payment_status = 'IN_PROGRESS' THEN 1 END) as in_progress_payments,
-        COUNT(CASE WHEN payment_status = 'COMPLETED' THEN 1 END) as completed_payments
-      FROM department_head_leads
-      WHERE created_by = $1
+        COUNT(CASE WHEN dhl.sales_status = 'PENDING' THEN 1 END) as pending,
+        COUNT(CASE WHEN dhl.sales_status = 'IN_PROGRESS' THEN 1 END) as in_progress,
+        COUNT(CASE WHEN dhl.sales_status = 'COMPLETED' THEN 1 END) as completed,
+        COUNT(CASE WHEN dhl.telecaller_status = 'ACTIVE' THEN 1 END) as active_telecallers,
+        COUNT(CASE WHEN dhl.telecaller_status = 'INACTIVE' THEN 1 END) as inactive_telecallers,
+        COUNT(CASE WHEN dhl.payment_status = 'PENDING' THEN 1 END) as pending_payments,
+        COUNT(CASE WHEN dhl.payment_status = 'IN_PROGRESS' THEN 1 END) as in_progress_payments,
+        COUNT(CASE WHEN dhl.payment_status = 'COMPLETED' THEN 1 END) as completed_payments
+      FROM department_head_leads dhl
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE dhl.created_by = $1
     `;
+    
+    const values = [createdBy];
+    let paramCount = 2;
 
-    const result = await DepartmentHeadLead.query(query, [createdBy]);
+    // STRICT CHECK: Add department and company filters
+    if (departmentType) {
+      query += ` AND dh.department_type = $${paramCount}`;
+      values.push(departmentType);
+      paramCount++;
+    }
+
+    if (companyName) {
+      query += ` AND dh.company_name = $${paramCount}`;
+      values.push(companyName);
+    }
+
+    const result = await DepartmentHeadLead.query(query, values);
     return result.rows && result.rows[0] ? result.rows[0] : {
       total: 0,
       pending: 0,

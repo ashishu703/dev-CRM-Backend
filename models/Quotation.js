@@ -462,37 +462,79 @@ class Quotation extends BaseModel {
 
   // Get quotations pending verification for department head
   // Check for status='pending' AND submitted_for_verification_at IS NOT NULL
-  async getPendingVerification() {
-    const queryText = `
+  async getPendingVerification(departmentType = null, companyName = null) {
+    let queryText = `
       SELECT q.*, 
              COUNT(qi.id) as item_count,
              q.created_by as salesperson_email
       FROM quotations q
       LEFT JOIN quotation_items qi ON q.id = qi.quotation_id
+      LEFT JOIN department_head_leads dhl ON dhl.id = q.customer_id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE (q.status = 'pending' OR q.status = 'pending_verification')
         AND q.submitted_for_verification_at IS NOT NULL
+    `;
+    
+    const values = [];
+    let paramCount = 1;
+
+    // STRICT CHECK: Filter by department type if provided
+    if (departmentType) {
+      queryText += ` AND dh.department_type = $${paramCount}`;
+      values.push(departmentType);
+      paramCount++;
+    }
+
+    // STRICT CHECK: Filter by company name if provided
+    if (companyName) {
+      queryText += ` AND dh.company_name = $${paramCount}`;
+      values.push(companyName);
+    }
+
+    queryText += `
       GROUP BY q.id
       ORDER BY q.submitted_for_verification_at DESC
     `;
     
-    const result = await query(queryText);
+    const result = await query(queryText, values);
     return result.rows;
   }
 
   // Get quotations by status for department head
-  async getByStatus(status) {
-    const queryText = `
+  async getByStatus(status, departmentType = null, companyName = null) {
+    let queryText = `
       SELECT q.*, 
              COUNT(qi.id) as item_count,
              q.created_by as salesperson_email
       FROM quotations q
       LEFT JOIN quotation_items qi ON q.id = qi.quotation_id
+      LEFT JOIN department_head_leads dhl ON dhl.id = q.customer_id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE q.status = $1
+    `;
+    
+    const values = [status];
+    let paramCount = 2;
+
+    // STRICT CHECK: Filter by department type if provided
+    if (departmentType) {
+      queryText += ` AND dh.department_type = $${paramCount}`;
+      values.push(departmentType);
+      paramCount++;
+    }
+
+    // STRICT CHECK: Filter by company name if provided
+    if (companyName) {
+      queryText += ` AND dh.company_name = $${paramCount}`;
+      values.push(companyName);
+    }
+
+    queryText += `
       GROUP BY q.id
       ORDER BY q.updated_at DESC
     `;
     
-    const result = await query(queryText, [status]);
+    const result = await query(queryText, values);
     return result.rows;
   }
 

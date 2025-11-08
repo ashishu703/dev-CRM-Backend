@@ -59,8 +59,17 @@ class LeadController {
       if (state) filters.state = state;
       if (productType) filters.productType = productType;
       if (connectedStatus) filters.connectedStatus = connectedStatus;
-      // Always scope to the authenticated creator (department head)
+      
+      // STRICT CHECK: Always scope to the authenticated creator (department head)
       filters.createdBy = req.user.email;
+      
+      // STRICT CHECK: Add department and company filters to prevent cross-department access
+      if (req.user.departmentType) {
+        filters.departmentType = req.user.departmentType;
+      }
+      if (req.user.companyName) {
+        filters.companyName = req.user.companyName;
+      }
 
       const pagination = {
         limit: parseInt(limit),
@@ -68,7 +77,13 @@ class LeadController {
       };
 
       const leads = await DepartmentHeadLead.getAll(filters, pagination);
-      const stats = await DepartmentHeadLead.getStats(req.user.email);
+      
+      // STRICT CHECK: Add department and company filters for stats
+      const stats = await DepartmentHeadLead.getStats(
+        req.user.email,
+        req.user.departmentType,
+        req.user.companyName
+      );
 
       res.json({
         success: true,
@@ -94,12 +109,19 @@ class LeadController {
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const lead = await DepartmentHeadLead.getById(id);
+      
+      // STRICT CHECK: Verify ownership - only return lead if it belongs to logged-in user's department and company
+      const lead = await DepartmentHeadLead.getById(
+        id,
+        req.user.email,
+        req.user.departmentType,
+        req.user.companyName
+      );
 
       if (!lead) {
         return res.status(404).json({
           success: false,
-          message: 'Lead not found'
+          message: 'Lead not found or you do not have access to this lead'
         });
       }
 
@@ -132,16 +154,36 @@ class LeadController {
       const { id } = req.params;
       const updateData = req.body;
 
-      const result = await DepartmentHeadLead.updateById(id, updateData);
+      // STRICT CHECK: Verify ownership before updating - only update if lead belongs to logged-in user's department and company
+      const result = await DepartmentHeadLead.updateById(
+        id,
+        updateData,
+        req.user.email,
+        req.user.departmentType,
+        req.user.companyName
+      );
 
       if (!result || result.rowCount === 0) {
         return res.status(404).json({
           success: false,
-          message: 'Lead not found'
+          message: 'Lead not found or you do not have permission to update this lead'
         });
       }
 
-      const updatedLead = await DepartmentHeadLead.getById(id);
+      // STRICT CHECK: Get updated lead with ownership verification
+      const updatedLead = await DepartmentHeadLead.getById(
+        id,
+        req.user.email,
+        req.user.departmentType,
+        req.user.companyName
+      );
+
+      if (!updatedLead) {
+        return res.status(404).json({
+          success: false,
+          message: 'Lead not found or you do not have access to this lead'
+        });
+      }
 
       // Sync salesperson lead if assignment changed or exists
       await leadAssignmentService.syncSalespersonLead(id);
@@ -174,7 +216,15 @@ class LeadController {
       }
 
       const { ids, updateData } = req.body;
-      const result = await DepartmentHeadLead.updateManyForCreator(ids, updateData, req.user.email);
+      
+      // STRICT CHECK: Add department and company verification for batch updates
+      const result = await DepartmentHeadLead.updateManyForCreator(
+        ids,
+        updateData,
+        req.user.email,
+        req.user.departmentType,
+        req.user.companyName
+      );
 
       // Sync salesperson leads if assignment-related fields changed
       if (result && result.rowCount > 0 && (updateData.assignedSalesperson || updateData.assignedTelecaller)) {
