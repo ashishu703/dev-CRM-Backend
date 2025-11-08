@@ -13,11 +13,40 @@ class DepartmentHeadLead extends BaseModel {
   }
 
   async createFromUi(uiLead, createdBy) {
+    // STRICT VALIDATION: Truncate customer name to max 100 chars
+    let customer = (uiLead.customer || '').toString().trim();
+    if (customer.length > 100) {
+      customer = customer.substring(0, 100);
+    }
+    
+    // Clean phone: remove non-digits but allow longer numbers (up to 50 chars)
+    let phone = (uiLead.phone || '').toString().trim();
+    if (phone) {
+      phone = phone.replace(/\D/g, ''); // Remove non-digits
+      // Allow up to 50 characters (no truncation)
+      if (phone.length > 50) {
+        phone = phone.substring(0, 50);
+      }
+    }
+    
+    // Clean whatsapp: remove non-digits but allow longer numbers (up to 50 chars)
+    let whatsapp = (uiLead.whatsapp || '').toString().trim();
+    if (whatsapp) {
+      whatsapp = whatsapp.replace(/\D/g, ''); // Remove non-digits
+      // Allow up to 50 characters (no truncation)
+      if (whatsapp.length > 50) {
+        whatsapp = whatsapp.substring(0, 50);
+      }
+    } else if (phone) {
+      // If whatsapp is empty, use phone
+      whatsapp = phone;
+    }
+    
     // Prevent duplicates per creator by phone
-    if (uiLead.phone) {
+    if (phone) {
       const checkRes = await DepartmentHeadLead.query(
         'SELECT id FROM department_head_leads WHERE created_by = $1 AND phone = $2 LIMIT 1',
-        [createdBy, uiLead.phone]
+        [createdBy, phone]
       );
       if (checkRes.rows && checkRes.rows[0]) {
         return checkRes.rows[0];
@@ -39,7 +68,7 @@ class DepartmentHeadLead extends BaseModel {
 
     const values = [
       customerId,
-      uiLead.customer || null,
+      customer || null,
       uiLead.email || null,
       uiLead.business || null,
       uiLead.leadSource || null,
@@ -49,13 +78,13 @@ class DepartmentHeadLead extends BaseModel {
       uiLead.createdAt || null,
       uiLead.telecallerStatus || 'INACTIVE',
       uiLead.paymentStatus || 'PENDING',
-      uiLead.phone || null,
+      phone || null,
       uiLead.address || null,
       (uiLead.gstNo === undefined || uiLead.gstNo === null || String(uiLead.gstNo).trim() === '' ? 'N/A' : uiLead.gstNo),
       uiLead.state || null,
       uiLead.customerType || null,
       uiLead.date || null,
-      uiLead.whatsapp || null,
+      whatsapp || null,
       uiLead.assignedSalesperson || null,
       uiLead.assignedTelecaller || null,
       createdBy
@@ -109,29 +138,60 @@ class DepartmentHeadLead extends BaseModel {
       RETURNING id
     `;
 
-    const values = filteredRows.flatMap((r) => [
-      r.customerId || this.generateCustomerId(),
-      r.customer || null,
-      r.email || null,
-      r.business || null,
-      r.leadSource || null,
-      r.productNames || r.productNamesText || 'N/A',
-      r.category || 'N/A',
-      r.salesStatus || 'PENDING',
-      r.createdAt || null,
-      r.telecallerStatus || 'INACTIVE',
-      r.paymentStatus || 'PENDING',
-      r.phone || null,
-      r.address || null,
-      (r.gstNo === undefined || r.gstNo === null || String(r.gstNo).trim() === '' ? 'N/A' : r.gstNo),
-      r.state || null,
-      r.customerType || null,
-      r.date || null,
-      r.whatsapp || null,
-      r.assignedSalesperson || null,
-      r.assignedTelecaller || null,
-      createdBy
-    ]);
+    const values = filteredRows.flatMap((r) => {
+      // STRICT VALIDATION: Truncate customer name to max 100 chars
+      let customer = (r.customer || '').toString().trim();
+      if (customer.length > 100) {
+        customer = customer.substring(0, 100);
+      }
+      
+      // Clean phone: remove non-digits but allow longer numbers (up to 50 chars)
+      let phone = (r.phone || '').toString().trim();
+      if (phone) {
+        phone = phone.replace(/\D/g, ''); // Remove non-digits
+        // Allow up to 50 characters (no truncation)
+        if (phone.length > 50) {
+          phone = phone.substring(0, 50);
+        }
+      }
+      
+      // Clean whatsapp: remove non-digits but allow longer numbers (up to 50 chars)
+      let whatsapp = (r.whatsapp || '').toString().trim();
+      if (whatsapp) {
+        whatsapp = whatsapp.replace(/\D/g, ''); // Remove non-digits
+        // Allow up to 50 characters (no truncation)
+        if (whatsapp.length > 50) {
+          whatsapp = whatsapp.substring(0, 50);
+        }
+      } else if (phone) {
+        // If whatsapp is empty, use phone
+        whatsapp = phone;
+      }
+      
+      return [
+        r.customerId || this.generateCustomerId(),
+        customer || null,
+        r.email || null,
+        r.business || null,
+        r.leadSource || null,
+        r.productNames || r.productNamesText || 'N/A',
+        r.category || 'N/A',
+        r.salesStatus || 'PENDING',
+        r.createdAt || null,
+        r.telecallerStatus || 'INACTIVE',
+        r.paymentStatus || 'PENDING',
+        phone || null,
+        r.address || null,
+        (r.gstNo === undefined || r.gstNo === null || String(r.gstNo).trim() === '' ? 'N/A' : r.gstNo),
+        r.state || null,
+        r.customerType || null,
+        r.date || null,
+        whatsapp || null,
+        r.assignedSalesperson || null,
+        r.assignedTelecaller || null,
+        createdBy
+      ];
+    });
     const insertResult = await DepartmentHeadLead.query(query, values);
     const duplicatesCount = rows.length - filteredRows.length;
     return { rowCount: insertResult.rowCount, rows: insertResult.rows, duplicatesCount };
