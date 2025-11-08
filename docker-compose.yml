@@ -31,7 +31,3 @@ services:
 networks:
   anocab-network:
     driver: bridge
-
-# Optional volumes section if you use a containerized database in the future
-# volumes:
-#   postgres_data:

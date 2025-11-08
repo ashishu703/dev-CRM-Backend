@@ -14,6 +14,7 @@ jobs:
 
       - name: Setup SSH
         run: |
+          rm -rf ~/.ssh
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -21,13 +22,15 @@ jobs:
 
       - name: Deploy on VPS
         run: |
-          # YAHAN FIX KIYA GAYA HAI:
-          # '<< EOF' ko hata kar command ko seedha SSH mein bhej diya hai
           ssh -i ~/.ssh/id_rsa -tt root@${{ secrets.SERVER_IP }} " \
             set -e; \
             cd /var/www/myapp; \
+            echo 'FORCE DELETING corrupt .env file from server...'; \
+            rm -f /var/www/myapp/.env; \
+            echo 'Fetching latest code from git...'; \
             git fetch origin master; \
             git reset --hard origin/master; \
+            echo 'Starting containers with new, clean files...'; \
             docker compose down; \
             docker compose up -d --build; \
             echo 'Deployment successful!'; \
