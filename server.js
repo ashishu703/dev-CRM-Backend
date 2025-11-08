@@ -39,13 +39,15 @@ app.options('*', cors(corsOptions));
 
 // Rate limiting - increased limit for development to prevent IP blocking during testing
 const isDevelopment = (process.env.NODE_ENV || 'development') !== 'production';
+// Get trusted IPs from environment variable (comma-separated)
+const trustedIps = process.env.TRUSTED_IPS ? process.env.TRUSTED_IPS.split(',').map(ip => ip.trim()) : [];
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
   // Much higher limit for development (1000), normal limit for production (100)
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (isDevelopment ? 1000 : 100),
   standardHeaders: true,
   legacyHeaders: false,
-  // Skip limiting for local development and localhost IPs
+  // Skip limiting for local development, localhost IPs, and trusted IPs
   skip: (req) => {
     const ip = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.headers['x-real-ip'] || '';
     const isLocalIp = 
@@ -56,7 +58,8 @@ const limiter = rateLimit({
       ip.startsWith('127.') ||
       ip.startsWith('192.168.') ||
       ip.startsWith('10.');
-    return isDevelopment || isLocalIp;
+    const isTrustedIp = trustedIps.some(trustedIp => ip === trustedIp || ip.includes(trustedIp));
+    return isDevelopment || isLocalIp || isTrustedIp;
   },
   message: {
     error: 'Too many requests from this IP, please try again later.'
