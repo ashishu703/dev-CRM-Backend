@@ -1,33 +1,33 @@
 name: CI/CD Deploy Backend
 
 on:
-  push:
-    branches: [ "master" ] # Ya "main", jo bhi aapki branch hai
+  push:
+    branches: [ "master" ] # Ya "main", jo bhi aapki branch hai
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Setup SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
 
-      - name: Deploy on VPS
-        run: |
-          ssh -i ~/.ssh/id_rsa -tt root@${{ secrets.SERVER_IP }} " \
-            set -e; \
-            cd /var/www/myapp; \
-            git fetch origin master; \
+      - name: Deploy on VPS
+        run: |
+          ssh -i ~/.ssh/id_rsa -tt root@${{ secrets.SERVER_IP }} " \
+            set -e; \
+            cd /var/www/myapp; \
+            git fetch origin master; \
             git clean -fd; \
-            git reset --hard origin/master; \
-            docker compose down; \
-            docker compose up -d --build; \
-            echo 'Deployment successful!'; \
-          "
+            git reset --hard origin/master; \
+            docker compose down; \
+            docker compose up -d --build; \
+            echo 'Deployment successful!'; \
+          "
