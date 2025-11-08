@@ -14,7 +14,7 @@ jobs:
 
       - name: Setup SSH
         run: |
-          rm -rf ~/.ssh  # <-- YEH NAYI LINE ADD KI HAI
+          rm -rf ~/.ssh
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -25,9 +25,12 @@ jobs:
           ssh -i ~/.ssh/id_rsa -tt root@${{ secrets.SERVER_IP }} " \
             set -e; \
             cd /var/www/myapp; \
+            echo 'Manually deleting corrupt .env file...'; \
+            rm -f /var/www/myapp/.env; \
+            echo 'Fetching latest code from git...'; \
             git fetch origin master; \
-            git clean -fd; \
             git reset --hard origin/master; \
+            echo 'Starting containers...'; \
             docker compose down; \
             docker compose up -d --build; \
             echo 'Deployment successful!'; \
