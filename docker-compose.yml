@@ -1,35 +1,31 @@
 version: '3.8'
 
 services:
-  app:
-    build: .
-    container_name: anocab-backend
-    ports:
-      - "4500:4500"
-    environment:
-      - NODE_ENV=production
-      - PORT=4500
-      # --- THIS IS THE CRITICAL FIX ---
-      - ALLOWED_ORIGINS=http://62.72.12.249:8080
-    env_file:
-      - .env
-    volumes:
-      - ./uploads:/app/uploads
-      - ./logs:/app/logs
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4500/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - anocab-network
+  app:
+    build: .
+    container_name: anocab-backend
+    ports:
+      - "4500:4500"
+    environment:
+      - NODE_ENV=production
+      - PORT=4500
+      # --- YAHAN SE 'ALLOWED_ORIGINS' WALI LINE HATA DI GAYI HAI ---
+      # Pehle yahan "- ALLOWED_ORIGINS=http://62.72.12.249:8080" likha tha
+    env_file:
+      - .env  # Ab container yahan se sahi value uthayega
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4500/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - anocab-network
 
 networks:
-  anocab-network:
-    driver: bridge
-
-# Optional volumes section if you use a containerized database in the future
-# volumes:
-#   postgres_data:
+  anocab-network:
+    driver: bridge
