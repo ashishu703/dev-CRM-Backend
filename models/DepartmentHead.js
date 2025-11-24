@@ -161,17 +161,29 @@ class DepartmentHead extends BaseModel {
     if (!this.target_start_date) return false;
     const startDate = new Date(this.target_start_date);
     const now = new Date();
-    const daysDiff = Math.floor((now - startDate) / (1000 * 60 * 60 * 24));
-    return daysDiff > 30;
+    
+    // Target expires at end of the month it started
+    const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+    
+    return now > monthEnd;
   }
 
-  // Get days remaining until target expires
+  // Get days remaining until target expires (month end logic)
   getTargetDaysRemaining() {
     if (!this.target_start_date) return null;
     const startDate = new Date(this.target_start_date);
     const now = new Date();
-    const daysDiff = Math.floor((now - startDate) / (1000 * 60 * 60 * 24));
-    return Math.max(0, 30 - daysDiff);
+    
+    // Calculate month end from start date (target expires at end of the month it started)
+    const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+    
+    // Calculate days remaining until month end
+    if (monthEnd < now) return 0;
+    const diffTime = monthEnd - now;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, diffDays);
   }
 
   async delete() {

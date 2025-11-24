@@ -200,9 +200,11 @@ class DepartmentHeadLead extends BaseModel {
   async getAll(filters = {}, pagination = {}) {
     let query = `
       SELECT 
-        dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, dhl.product_names, dhl.category,
+        dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, 
+        COALESCE(dhl.product_names, sl.product_type) AS product_names, dhl.category,
         dhl.sales_status, dhl.created, dhl.telecaller_status, dhl.payment_status,
-        dhl.phone, dhl.address, dhl.gst_no, dhl.state, dhl.customer_type, dhl.date,
+        dhl.phone, COALESCE(dhl.address, sl.address) AS address, dhl.gst_no, 
+        COALESCE(dhl.state, sl.state) AS state, dhl.customer_type, dhl.date,
         dhl.whatsapp, dhl.assigned_salesperson, dhl.assigned_telecaller,
         dhl.created_by, dhl.created_at, dhl.updated_at,
         sl.follow_up_status AS follow_up_status,

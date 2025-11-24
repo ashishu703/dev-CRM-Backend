@@ -506,6 +506,195 @@ class QuotationController {
       });
     }
   }
+
+  // Get quotations for multiple customers (bulk)
+  async getBulkByCustomers(req, res) {
+    try {
+      const { customerIds } = req.query;
+      
+      if (!customerIds) {
+        return res.status(400).json({
+          success: false,
+          message: 'customerIds query parameter is required'
+        });
+      }
+
+      // Parse customerIds (comma-separated or JSON array)
+      let idsArray = [];
+      try {
+        if (typeof customerIds === 'string') {
+          // Try parsing as JSON array first
+          if (customerIds.startsWith('[')) {
+            idsArray = JSON.parse(customerIds);
+          } else {
+            // Comma-separated string
+            idsArray = customerIds.split(',').map(id => id.trim()).filter(id => id);
+          }
+        } else if (Array.isArray(customerIds)) {
+          idsArray = customerIds;
+        }
+      } catch (parseError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid customerIds format'
+        });
+      }
+
+      if (idsArray.length === 0) {
+        return res.json({
+          success: true,
+          data: []
+        });
+      }
+
+      // Build query with IN clause
+      const placeholders = idsArray.map((_, index) => `$${index + 1}`).join(',');
+      const quotationsQuery = `
+        SELECT 
+          q.*
+        FROM quotations q
+        WHERE q.customer_id IN (${placeholders})
+        ORDER BY q.created_at DESC
+      `;
+      
+      const quotationsResult = await query(quotationsQuery, idsArray);
+      const quotations = quotationsResult.rows || [];
+      
+      res.json({
+        success: true,
+        data: quotations
+      });
+    } catch (error) {
+      console.error('Error fetching bulk quotations by customers:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch bulk quotations',
+        error: error.message
+      });
+    }
+  }
+
+  // Get summaries for multiple quotations (bulk)
+  async getBulkSummaries(req, res) {
+    try {
+      const { quotationIds } = req.query;
+      
+      if (!quotationIds) {
+        return res.status(400).json({
+          success: false,
+          message: 'quotationIds query parameter is required'
+        });
+      }
+
+      // Parse quotationIds
+      let idsArray = [];
+      try {
+        if (typeof quotationIds === 'string') {
+          if (quotationIds.startsWith('[')) {
+            idsArray = JSON.parse(quotationIds);
+          } else {
+            idsArray = quotationIds.split(',').map(id => id.trim()).filter(id => id);
+          }
+        } else if (Array.isArray(quotationIds)) {
+          idsArray = quotationIds;
+        }
+      } catch (parseError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid quotationIds format'
+        });
+      }
+
+      if (idsArray.length === 0) {
+        return res.json({
+          success: true,
+          data: []
+        });
+      }
+
+      // Fetch summaries for all quotations
+      const summaries = [];
+      
+      for (const quotationId of idsArray) {
+        try {
+          // Get quotation with items
+          const quotation = await Quotation.getWithItems(quotationId);
+          
+          if (!quotation) {
+            summaries.push({
+              quotation_id: quotationId,
+              error: 'Quotation not found'
+            });
+            continue;
+          }
+
+          // Get PIs for this quotation
+          const piQuery = `
+            SELECT * FROM proforma_invoices 
+            WHERE quotation_id = $1
+            ORDER BY created_at DESC
+          `;
+          const piResult = await query(piQuery, [quotationId]);
+          const pis = piResult.rows || [];
+
+          // Get payments for this quotation
+          const paymentQuery = `
+            SELECT * FROM payment_history 
+            WHERE quotation_id = $1
+            ORDER BY payment_date DESC, created_at DESC
+          `;
+          const paymentResult = await query(paymentQuery, [quotationId]);
+          const payments = paymentResult.rows || [];
+
+          // Calculate payment totals
+          const completedPayments = payments.filter(p => 
+            p.payment_status === 'completed' && !p.is_refund
+          );
+          const totalPaid = completedPayments.reduce((sum, p) => 
+            sum + Number(p.installment_amount || 0), 0
+          );
+          const advancePayment = completedPayments.find(p => 
+            p.installment_number === 1 || p.payment_type === 'advance'
+          );
+          const advanceAmount = advancePayment ? Number(advancePayment.installment_amount || 0) : 0;
+          const dueAmount = Math.max(0, Number(quotation.total_amount) - totalPaid);
+
+          summaries.push({
+            quotation_id: quotationId,
+            quotation,
+            pis,
+            payments,
+            summary: {
+              total_amount: Number(quotation.total_amount),
+              total_paid: totalPaid,
+              advance_amount: advanceAmount,
+              due_amount: dueAmount,
+              pi_count: pis.length,
+              payment_count: payments.length
+            }
+          });
+        } catch (err) {
+          console.warn(`Error fetching summary for quotation ${quotationId}:`, err);
+          summaries.push({
+            quotation_id: quotationId,
+            error: err.message
+          });
+        }
+      }
+      
+      res.json({
+        success: true,
+        data: summaries
+      });
+    } catch (error) {
+      console.error('Error fetching bulk summaries:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch bulk summaries',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new QuotationController();

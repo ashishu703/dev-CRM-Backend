@@ -166,17 +166,47 @@ class Payment extends BaseModel {
    * @returns {Promise<Object>} Updated payment record
    */
   async approvePayment(paymentId, approvedBy) {
+    return this.updateApprovalStatus(paymentId, 'approved', approvedBy, null);
+  }
+
+  /**
+   * Update payment approval status (pending/approved/rejected)
+   * @param {number} paymentId
+   * @param {'pending'|'approved'|'rejected'} status
+   * @param {string} actionBy
+   * @param {string|null} notes
+   * @returns {Promise<Object>}
+   */
+  async updateApprovalStatus(paymentId, status, actionBy, notes) {
+    const normalizedStatus = (status || 'pending').toLowerCase();
+    if (!['pending', 'approved', 'rejected'].includes(normalizedStatus)) {
+      throw new Error('Invalid approval status');
+    }
+
+    const isApproved = normalizedStatus === 'approved';
     const queryText = `
       UPDATE payment_history 
-      SET payment_approved = true,
-          payment_approved_by = $2,
-          payment_approved_at = NOW(),
+      SET approval_status = $2,
+          approval_action_by = $3,
+          approval_notes = $4,
+          payment_approved = $5,
+          payment_approved_by = CASE WHEN $5 THEN $6 ELSE NULL END,
+          payment_approved_at = CASE WHEN $5 THEN NOW() ELSE NULL END,
           updated_at = NOW()
       WHERE id = $1
       RETURNING *
     `;
-    
-    const result = await query(queryText, [paymentId, approvedBy]);
+
+    const actionByValue = actionBy || null;
+    const result = await query(queryText, [
+      paymentId,
+      normalizedStatus,
+      actionByValue,
+      notes || null,
+      isApproved,
+      actionByValue
+    ]);
+
     return result.rows[0];
   }
 

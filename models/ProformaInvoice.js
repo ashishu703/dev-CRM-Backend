@@ -157,6 +157,17 @@ class ProformaInvoice extends BaseModel {
         ) RETURNING *
       `;
       
+      // Use adjusted amounts if provided (for remaining amount PIs), otherwise use quotation amounts
+      const subtotal = piData.subtotal !== undefined && piData.subtotal !== null 
+        ? Number(piData.subtotal) 
+        : quotation.subtotal;
+      const taxAmount = piData.taxAmount !== undefined && piData.taxAmount !== null 
+        ? Number(piData.taxAmount) 
+        : quotation.tax_amount;
+      const totalAmount = piData.totalAmount !== undefined && piData.totalAmount !== null 
+        ? Number(piData.totalAmount) 
+        : quotation.total_amount;
+      
       const piValues = [
         piNumber,
         quotationId,
@@ -165,10 +176,10 @@ class ProformaInvoice extends BaseModel {
         piData.piDate || new Date().toISOString().split('T')[0],
         piData.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         piData.status || 'draft',
-        quotation.subtotal,
-        quotation.tax_amount,
-        quotation.total_amount,
-        quotation.total_amount, // remaining_balance = total_amount initially
+        subtotal,
+        taxAmount,
+        totalAmount,
+        totalAmount, // remaining_balance = total_amount initially
         piData.dispatch_mode || piData.dispatchMode || null,
         piData.transport_name || piData.transportName || null,
         piData.vehicle_number || piData.vehicleNumber || null,

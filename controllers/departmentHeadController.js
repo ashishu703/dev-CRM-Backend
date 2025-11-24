@@ -1,10 +1,11 @@
 const DepartmentHead = require('../models/DepartmentHead');
 const BaseController = require('./BaseController');
+const DepartmentCleanupService = require('../services/departmentCleanupService');
 
 class DepartmentHeadController extends BaseController {
   static async create(req, res) {
     await BaseController.handleAsyncOperation(res, async () => {
-      const { username, email, password, departmentType, companyName, target } = req.body;
+      const { username, email, password, departmentType, companyName, target, monthlyTarget } = req.body;
       
       BaseController.validateRequiredFields(['username', 'email', 'password', 'departmentType', 'companyName'], req.body);
       
@@ -20,9 +21,17 @@ class DepartmentHeadController extends BaseController {
         throw new Error('A department head already exists for this company and department');
       }
 
+      // Handle monthlyTarget -> target conversion (same as update)
+      let finalTarget = target;
+      if (monthlyTarget !== undefined && target === undefined) {
+        finalTarget = typeof monthlyTarget === 'string' 
+          ? parseFloat(monthlyTarget) 
+          : monthlyTarget;
+      }
+
       const userData = {
         username, email, password, departmentType, companyName,
-        target: target || 0,
+        target: finalTarget || 0,
         createdBy: req.user.id
       };
 
@@ -109,15 +118,21 @@ class DepartmentHeadController extends BaseController {
       const user = await DepartmentHead.findById(id);
       if (!user) throw new Error('Department head not found');
       
-      // Check if department head has subordinates
+      // Check if department head has subordinates (for information only)
       const DepartmentUser = require('../models/DepartmentUser');
       const subordinates = await DepartmentUser.getByHeadUserId(id);
-      if (subordinates.length > 0) {
-        throw new Error('Cannot delete department head with active subordinates');
-      }
       
+      // Delete all department data (users, leads, docs) associated with this head
+      await DepartmentCleanupService.deleteDepartmentHeadData(user);
+
+      // Delete the department head record itself
       await user.delete();
-      return {};
+      
+      return {
+        message: subordinates.length > 0 
+          ? `Department head deleted. ${subordinates.length} subordinate(s) have been unassigned.`
+          : 'Department head deleted successfully'
+      };
     }, 'Department head deleted successfully', 'Failed to delete department head');
   }
 
