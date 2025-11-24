@@ -402,7 +402,7 @@ class PaymentController {
    */
   async getAllPayments(req, res) {
     try {
-      const { page = 1, limit = 50, status, search, startDate, endDate } = req.query;
+      const { page = 1, limit = 50, status, approvalStatus, search, startDate, endDate } = req.query;
       const offset = (page - 1) * limit;
 
       let whereClause = 'WHERE 1=1';
@@ -412,8 +412,14 @@ class PaymentController {
       // Add status filter
       if (status && status !== 'All Status') {
         paramCount++;
-        whereClause += ` AND payment_status = $${paramCount}`;
+        whereClause += ` AND ph.payment_status = $${paramCount}`;
         values.push(status.toLowerCase());
+      }
+
+      if (approvalStatus && approvalStatus.toLowerCase() !== 'all') {
+        paramCount++;
+        whereClause += ` AND ph.approval_status = $${paramCount}`;
+        values.push(approvalStatus.toLowerCase());
       }
 
       // Add search filter
@@ -441,7 +447,7 @@ class PaymentController {
       }
 
       // Get total count
-      const countQuery = `SELECT COUNT(*) FROM payment_history ${whereClause}`;
+      const countQuery = `SELECT COUNT(*) FROM payment_history ph ${whereClause}`;
       const countResult = await query(countQuery, values);
       const totalCount = parseInt(countResult.rows[0].count);
 
@@ -542,9 +548,10 @@ class PaymentController {
   async approvePayment(req, res) {
     try {
       const { id } = req.params;
+      const { notes } = req.body || {};
       const approvedBy = req.user?.email || req.user?.username || 'system';
 
-      const payment = await Payment.approvePayment(id, approvedBy);
+      const payment = await Payment.updateApprovalStatus(id, 'approved', approvedBy, notes || null);
 
       if (!payment) {
         return res.status(404).json({
@@ -563,6 +570,46 @@ class PaymentController {
       res.status(500).json({
         success: false,
         message: 'Failed to approve payment',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Update payment approval status (approved/pending/rejected)
+   */
+  async updateApprovalStatus(req, res) {
+    try {
+      const { id } = req.params;
+      const { status, notes } = req.body || {};
+
+      if (!status) {
+        return res.status(400).json({
+          success: false,
+          message: 'Status is required'
+        });
+      }
+
+      const actionBy = req.user?.email || req.user?.username || 'system';
+      const payment = await Payment.updateApprovalStatus(id, status, actionBy, notes || null);
+
+      if (!payment) {
+        return res.status(404).json({
+          success: false,
+          message: 'Payment not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `Payment marked as ${status}`,
+        data: payment
+      });
+    } catch (error) {
+      console.error('Error updating payment approval status:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to update payment approval status',
         error: error.message
       });
     }
@@ -663,6 +710,136 @@ class PaymentController {
       res.status(500).json({
         success: false,
         message: 'Failed to fetch payment',
+        error: error.message
+      });
+    }
+  }
+
+  // Get payments for multiple customers (bulk)
+  async getBulkByCustomers(req, res) {
+    try {
+      const { customerIds } = req.query;
+      
+      if (!customerIds) {
+        return res.status(400).json({
+          success: false,
+          message: 'customerIds query parameter is required'
+        });
+      }
+
+      // Parse customerIds
+      let idsArray = [];
+      try {
+        if (typeof customerIds === 'string') {
+          if (customerIds.startsWith('[')) {
+            idsArray = JSON.parse(customerIds);
+          } else {
+            idsArray = customerIds.split(',').map(id => id.trim()).filter(id => id);
+          }
+        } else if (Array.isArray(customerIds)) {
+          idsArray = customerIds;
+        }
+      } catch (parseError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid customerIds format'
+        });
+      }
+
+      if (idsArray.length === 0) {
+        return res.json({
+          success: true,
+          data: []
+        });
+      }
+
+      // Build query with IN clause
+      const placeholders = idsArray.map((_, index) => `$${index + 1}`).join(',');
+      const paymentsQuery = `
+        SELECT 
+          ph.*
+        FROM payment_history ph
+        WHERE ph.lead_id IN (${placeholders})
+        ORDER BY ph.payment_date DESC, ph.created_at DESC
+      `;
+      
+      const paymentsResult = await query(paymentsQuery, idsArray);
+      const payments = paymentsResult.rows || [];
+      
+      res.json({
+        success: true,
+        data: payments
+      });
+    } catch (error) {
+      console.error('Error fetching bulk payments by customers:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch bulk payments',
+        error: error.message
+      });
+    }
+  }
+
+  // Get payments for multiple quotations (bulk)
+  async getBulkByQuotations(req, res) {
+    try {
+      const { quotationIds } = req.query;
+      
+      if (!quotationIds) {
+        return res.status(400).json({
+          success: false,
+          message: 'quotationIds query parameter is required'
+        });
+      }
+
+      // Parse quotationIds
+      let idsArray = [];
+      try {
+        if (typeof quotationIds === 'string') {
+          if (quotationIds.startsWith('[')) {
+            idsArray = JSON.parse(quotationIds);
+          } else {
+            idsArray = quotationIds.split(',').map(id => id.trim()).filter(id => id);
+          }
+        } else if (Array.isArray(quotationIds)) {
+          idsArray = quotationIds;
+        }
+      } catch (parseError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid quotationIds format'
+        });
+      }
+
+      if (idsArray.length === 0) {
+        return res.json({
+          success: true,
+          data: []
+        });
+      }
+
+      // Build query with IN clause
+      const placeholders = idsArray.map((_, index) => `$${index + 1}`).join(',');
+      const paymentsQuery = `
+        SELECT 
+          ph.*
+        FROM payment_history ph
+        WHERE ph.quotation_id IN (${placeholders})
+        ORDER BY ph.payment_date DESC, ph.created_at DESC
+      `;
+      
+      const paymentsResult = await query(paymentsQuery, idsArray);
+      const payments = paymentsResult.rows || [];
+      
+      res.json({
+        success: true,
+        data: payments
+      });
+    } catch (error) {
+      console.error('Error fetching bulk payments by quotations:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch bulk payments',
         error: error.message
       });
     }

@@ -24,11 +24,15 @@ class AuthService {
       if (dept === 'marketing_sales' || dept === 'marketing department') return 'marketingdepartmenthead';
       if (dept === 'hr' || dept === 'human resources') return 'hrdepartmenthead';
       if (dept === 'production' || dept === 'production department') return 'productiondepartmenthead';
+      if (dept === 'accounts' || dept === 'accounts department') return 'accountsdepartmenthead';
+      if (dept === 'it' || dept === 'it department') return 'itdepartmenthead';
       return 'salesdepartmenthead';
     }
     // department_user
     if (dept === 'production' || dept === 'production department') return 'production-staff';
     if (dept === 'marketing_sales' || dept === 'marketing department') return 'marketing-salesperson';
+    if (dept === 'accounts' || dept === 'accounts department') return 'accounts-user';
+    if (dept === 'it' || dept === 'it department') return 'it-user';
     return 'salesperson';
   }
 

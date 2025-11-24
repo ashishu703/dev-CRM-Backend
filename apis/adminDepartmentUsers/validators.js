@@ -1,10 +1,12 @@
 const Joi = require('joi');
 
+const SUPPORTED_DEPARTMENT_TYPES = ['marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it'];
+
 const createUserSchema = Joi.object({
   username: Joi.string().min(3).max(255).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(6).required(),
-  departmentType: Joi.string().valid('marketing_sales', 'office_sales', 'hr', 'production').required(),
+  departmentType: Joi.string().valid(...SUPPORTED_DEPARTMENT_TYPES).required(),
   companyName: Joi.string().valid('Anode Electric Pvt. Ltd.', 'Anode Metals', 'Samrridhi Industries').required(),
   role: Joi.string().valid('department_user', 'department_head').required(),
   headUser: Joi.string().when('role', { 
@@ -18,7 +20,7 @@ const updateUserSchema = Joi.object({
   username: Joi.string().min(3).max(255).optional(),
   email: Joi.string().email().optional(),
   password: Joi.string().min(6).optional(),
-  departmentType: Joi.string().valid('marketing_sales', 'office_sales', 'hr', 'production').optional(),
+  departmentType: Joi.string().valid(...SUPPORTED_DEPARTMENT_TYPES).optional(),
   companyName: Joi.string().valid('Anode Electric Pvt. Ltd.', 'Anode Metals', 'Samrridhi Industries').optional(),
   role: Joi.string().valid('department_user', 'department_head').optional(),
   headUser: Joi.string().optional(),
@@ -34,7 +36,7 @@ const querySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1),
   limit: Joi.number().integer().min(1).max(100).default(10),
   companyName: Joi.string().valid('Anode Electric Pvt. Ltd.', 'Anode Metals', 'Samrridhi Industries').optional(),
-  departmentType: Joi.string().valid('marketing_sales', 'office_sales', 'hr', 'production').optional(),
+  departmentType: Joi.string().valid(...SUPPORTED_DEPARTMENT_TYPES).optional(),
   role: Joi.string().valid('department_user', 'department_head').optional(),
   isActive: Joi.boolean().optional(),
   search: Joi.string().max(255).optional()

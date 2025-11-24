@@ -52,6 +52,10 @@ class ProformaInvoiceController {
         validUntil: req.body.validUntil,
         status: req.body.status || 'draft',
         createdBy: req.user.email,
+        // Adjusted amounts for remaining amount PIs (if provided)
+        subtotal: req.body.subtotal,
+        taxAmount: req.body.taxAmount || req.body.tax_amount,
+        totalAmount: req.body.totalAmount || req.body.total_amount,
         // Dispatch details
         dispatchMode: req.body.dispatchMode || req.body.dispatch_mode,
         transportName: req.body.transportName || req.body.transport_name,
@@ -230,6 +234,72 @@ class ProformaInvoiceController {
       res.status(500).json({
         success: false,
         message: 'Failed to delete Proforma Invoice',
+        error: error.message
+      });
+    }
+  }
+
+  // Get PIs for multiple quotations (bulk)
+  async getBulkByQuotations(req, res) {
+    try {
+      const { quotationIds } = req.query;
+      
+      if (!quotationIds) {
+        return res.status(400).json({
+          success: false,
+          message: 'quotationIds query parameter is required'
+        });
+      }
+
+      // Parse quotationIds
+      let idsArray = [];
+      try {
+        if (typeof quotationIds === 'string') {
+          if (quotationIds.startsWith('[')) {
+            idsArray = JSON.parse(quotationIds);
+          } else {
+            idsArray = quotationIds.split(',').map(id => id.trim()).filter(id => id);
+          }
+        } else if (Array.isArray(quotationIds)) {
+          idsArray = quotationIds;
+        }
+      } catch (parseError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid quotationIds format'
+        });
+      }
+
+      if (idsArray.length === 0) {
+        return res.json({
+          success: true,
+          data: []
+        });
+      }
+
+      // Build query with IN clause
+      const placeholders = idsArray.map((_, index) => `$${index + 1}`).join(',');
+      const pisQuery = `
+        SELECT 
+          pi.*
+        FROM proforma_invoices pi
+        WHERE pi.quotation_id IN (${placeholders})
+        ORDER BY pi.created_at DESC
+      `;
+      
+      const { query } = require('../config/database');
+      const pisResult = await query(pisQuery, idsArray);
+      const pis = pisResult.rows || [];
+      
+      res.json({
+        success: true,
+        data: pis
+      });
+    } catch (error) {
+      console.error('Error fetching bulk PIs by quotations:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch bulk PIs',
         error: error.message
       });
     }

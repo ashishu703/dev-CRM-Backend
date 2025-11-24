@@ -2,6 +2,7 @@ const DepartmentUser = require('../models/DepartmentUser');
 const DepartmentHead = require('../models/DepartmentHead');
 const BaseController = require('./BaseController');
 const TargetCalculationService = require('../services/targetCalculationService');
+const DepartmentCleanupService = require('../services/departmentCleanupService');
 
 class DepartmentUserController extends BaseController {
   static async create(req, res) {
@@ -10,11 +11,22 @@ class DepartmentUserController extends BaseController {
       
       BaseController.validateRequiredFields(['username', 'email', 'password', 'target'], req.body);
       
+      // Only check for active users - deleted users should not block new creation
       const existingUser = await DepartmentUser.findByEmail(email);
-      if (existingUser) throw new Error('User with this email already exists');
+      if (existingUser) {
+        // Double check if user is actually active (safety check)
+        if (existingUser.is_active !== false) {
+          throw new Error('User with this email already exists');
+        }
+      }
 
       const existingUsername = await DepartmentUser.findByUsername(username);
-      if (existingUsername) throw new Error('User with this username already exists');
+      if (existingUsername) {
+        // Double check if user is actually active (safety check)
+        if (existingUsername.is_active !== false) {
+          throw new Error('User with this username already exists');
+        }
+      }
 
       let headUser = null;
       if (headUserId) headUser = await DepartmentHead.findById(headUserId);
@@ -43,13 +55,44 @@ class DepartmentUserController extends BaseController {
         throw new Error(`Target exceeds available limit. Department head target: ₹${headTarget.toLocaleString('en-IN')}, Already distributed: ₹${totalDistributedTarget.toLocaleString('en-IN')}, Remaining: ₹${remainingTarget.toLocaleString('en-IN')}. You are trying to assign: ₹${userTarget.toLocaleString('en-IN')}`);
       }
 
-      // Validate target period - user's target period should not exceed department head's period (30 days)
+      // Validate target start date - must match department head's target start date
+      if (req.body.targetStartDate !== undefined) {
+        const userStartDate = new Date(req.body.targetStartDate).toISOString().split('T')[0];
+        const headStartDate = headUser.target_start_date 
+          ? new Date(headUser.target_start_date).toISOString().split('T')[0]
+          : null;
+        
+        if (headStartDate && userStartDate !== headStartDate) {
+          throw new Error(`Target start date must exactly match department head's target start date. Required: ${headStartDate}, Provided: ${userStartDate}`);
+        }
+      }
+      
+      // Validate target period - user's target period must exactly match department head's remaining period
       if (req.body.targetDurationDays !== undefined) {
         const userTargetDuration = parseInt(req.body.targetDurationDays);
-        const departmentHeadPeriod = 30; // Department head has 30-day target period
         
-        if (userTargetDuration > departmentHeadPeriod) {
-          throw new Error(`Target period cannot exceed department head's target period. Maximum allowed: ${departmentHeadPeriod} days, Provided: ${userTargetDuration} days`);
+        // Calculate department head's remaining days (month end logic)
+        let departmentHeadRemainingDays = 30; // Default if no target_start_date
+        if (headUser.target_start_date) {
+          const startDate = new Date(headUser.target_start_date);
+          const now = new Date();
+          
+          // Calculate month end from start date
+          const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+          monthEnd.setHours(23, 59, 59, 999);
+          
+          // Calculate days remaining until month end
+          if (monthEnd < now) {
+            departmentHeadRemainingDays = 0;
+          } else {
+            const diffTime = monthEnd - now;
+            departmentHeadRemainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          }
+        }
+        
+        // Enforce exact match - user's target duration must exactly equal department head's remaining days
+        if (userTargetDuration !== departmentHeadRemainingDays) {
+          throw new Error(`Target duration must exactly match department head's remaining target period. Required: ${departmentHeadRemainingDays} days, Provided: ${userTargetDuration} days`);
         }
       }
 
@@ -138,13 +181,25 @@ class DepartmentUserController extends BaseController {
       if (!user) throw new Error('Department user not found');
 
       if (updateData.email && updateData.email !== user.email) {
+        // Only check for active users - deleted users should not block updates
         const existingUser = await DepartmentUser.findByEmail(updateData.email);
-        if (existingUser) throw new Error('User with this email already exists');
+        if (existingUser && existingUser.id !== user.id) {
+          // Double check if user is actually active (safety check)
+          if (existingUser.is_active !== false) {
+            throw new Error('User with this email already exists');
+          }
+        }
       }
 
       if (updateData.username && updateData.username !== user.username) {
+        // Only check for active users - deleted users should not block updates
         const existingUsername = await DepartmentUser.findByUsername(updateData.username);
-        if (existingUsername) throw new Error('User with this username already exists');
+        if (existingUsername && existingUsername.id !== user.id) {
+          // Double check if user is actually active (safety check)
+          if (existingUsername.is_active !== false) {
+            throw new Error('User with this username already exists');
+          }
+        }
       }
 
       // Validate head user if being updated
@@ -195,13 +250,44 @@ class DepartmentUserController extends BaseController {
         }
       }
 
-      // Validate target period - user's target period should not exceed department head's period (30 days)
+      // Validate target start date - must match department head's target start date
+      if (updateData.targetStartDate !== undefined) {
+        const userStartDate = new Date(updateData.targetStartDate).toISOString().split('T')[0];
+        const headStartDate = headUser.target_start_date 
+          ? new Date(headUser.target_start_date).toISOString().split('T')[0]
+          : null;
+        
+        if (headStartDate && userStartDate !== headStartDate) {
+          throw new Error(`Target start date must exactly match department head's target start date. Required: ${headStartDate}, Provided: ${userStartDate}`);
+        }
+      }
+      
+      // Validate target period - user's target period must exactly match department head's remaining period
       if (updateData.targetDurationDays !== undefined) {
         const userTargetDuration = parseInt(updateData.targetDurationDays);
-        const departmentHeadPeriod = 30; // Department head has 30-day target period
         
-        if (userTargetDuration > departmentHeadPeriod) {
-          throw new Error(`Target period cannot exceed department head's target period. Maximum allowed: ${departmentHeadPeriod} days, Provided: ${userTargetDuration} days`);
+        // Calculate department head's remaining days (month end logic)
+        let departmentHeadRemainingDays = 30; // Default if no target_start_date
+        if (headUser.target_start_date) {
+          const startDate = new Date(headUser.target_start_date);
+          const now = new Date();
+          
+          // Calculate month end from start date
+          const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+          monthEnd.setHours(23, 59, 59, 999);
+          
+          // Calculate days remaining until month end
+          if (monthEnd < now) {
+            departmentHeadRemainingDays = 0;
+          } else {
+            const diffTime = monthEnd - now;
+            departmentHeadRemainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          }
+        }
+        
+        // Enforce exact match - user's target duration must exactly equal department head's remaining days
+        if (userTargetDuration !== departmentHeadRemainingDays) {
+          throw new Error(`Target duration must exactly match department head's remaining target period. Required: ${departmentHeadRemainingDays} days, Provided: ${userTargetDuration} days`);
         }
       }
 
@@ -216,6 +302,7 @@ class DepartmentUserController extends BaseController {
       const user = await DepartmentUser.findById(id);
       if (!user) throw new Error('Department user not found');
       
+      await DepartmentCleanupService.deleteDepartmentUserData(user);
       await user.delete();
       return {};
     }, 'Department user deleted successfully', 'Failed to delete department user');

@@ -1,5 +1,6 @@
 const BaseModel = require('./BaseModel');
 const bcrypt = require('bcryptjs');
+const logger = require('../utils/logger');
 
 class DepartmentUser extends BaseModel {
   static TABLE_NAME = 'department_users';
@@ -24,11 +25,21 @@ class DepartmentUser extends BaseModel {
   }
 
   static async findByEmail(email) {
-    return await this.findByField(this.TABLE_NAME, 'email', email);
+    // Only find active users (hard delete means record is gone, but check is_active for safety)
+    const result = await this.query(
+      `SELECT * FROM ${this.TABLE_NAME} WHERE email = $1 AND is_active = true`,
+      [email]
+    );
+    return result.rows.length > 0 ? new this(result.rows[0]) : null;
   }
 
   static async findByUsername(username) {
-    return await this.findByField(this.TABLE_NAME, 'username', username);
+    // Only find active users (hard delete means record is gone, but check is_active for safety)
+    const result = await this.query(
+      `SELECT * FROM ${this.TABLE_NAME} WHERE username = $1 AND is_active = true`,
+      [username]
+    );
+    return result.rows.length > 0 ? new this(result.rows[0]) : null;
   }
 
   static async findById(id) {
@@ -190,7 +201,24 @@ class DepartmentUser extends BaseModel {
   }
 
   async delete() {
-    return await super.delete(this.constructor.TABLE_NAME);
+    // Hard delete - permanently remove from database
+    // This ensures the record is completely removed and email/username can be reused
+    const result = await this.constructor.query(
+      `DELETE FROM ${this.constructor.TABLE_NAME} WHERE id = $1 RETURNING *`,
+      [this.id]
+    );
+    if (result.rows.length === 0) {
+      throw new Error('Department user not found or already deleted');
+    }
+    
+    // Log the deletion for audit purposes
+    logger.info('Department user permanently deleted', {
+      userId: this.id,
+      email: this.email,
+      username: this.username
+    });
+    
+    return true;
   }
 
   async verifyPassword(password) {

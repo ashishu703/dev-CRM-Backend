@@ -18,6 +18,8 @@ const quotationRoutes = require('./routes/quotations');
 const paymentRoutes = require('./routes/payments');
 const proformaInvoiceRoutes = require('./routes/proformaInvoices');
 const notificationRoutes = require('./routes/notifications');
+const configurationRoutes = require('./routes/configuration');
+const uploadRoutes = require('./routes/upload');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -111,6 +113,8 @@ app.use('/api/quotations', quotationRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/proforma-invoices', proformaInvoiceRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/configuration', configurationRoutes);
+app.use('/api/upload', uploadRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler
