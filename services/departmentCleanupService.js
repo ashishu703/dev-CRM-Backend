@@ -19,21 +19,26 @@ class DepartmentCleanupService {
     try {
       await client.query('BEGIN');
 
-      // Fetch department users under this head (capture their emails before deleting)
+      // Fetch department users under this head (capture their ids/emails/usernames before deleting)
       const usersRes = await client.query(
-        'SELECT id, email FROM department_users WHERE head_user_id = $1',
+        'SELECT id, email, username FROM department_users WHERE head_user_id = $1',
         [head.id]
       );
-      const userEmails = usersRes.rows
-        .map((row) => row.email)
-        .filter(Boolean);
+      const departmentUsers = usersRes.rows || [];
 
-      // Delete documents created by department users (quotations, PIs, leads, salesperson leads)
-      if (userEmails.length > 0) {
-        await this.deleteDocumentsForEmails(client, userEmails);
+      // For each department user, run full cleanup (documents + assignments)
+      for (const u of departmentUsers) {
+        if (!u) continue;
+        // Reuse the same transactional client to avoid nested transactions
+        const fakeUser = {
+          id: u.id,
+          email: u.email,
+          username: u.username
+        };
+        await this.deleteDepartmentUserData(fakeUser);
       }
 
-      // Remove department users belonging to this head
+      // Finally remove department user records belonging to this head
       await client.query('DELETE FROM department_users WHERE head_user_id = $1', [head.id]);
 
       // Delete documents created by the head
@@ -73,7 +78,47 @@ class DepartmentCleanupService {
     try {
       await client.query('BEGIN');
 
+      // 1) Delete any documents the user created (quotations, PIs, leads, payments)
       await this.deleteDocumentsForEmails(client, [user.email]);
+
+      // 2) Clean up leads where this user was assigned as salesperson or telecaller
+      const username = (user.username || '').toLowerCase().trim();
+      const email = (user.email || '').toLowerCase().trim();
+
+      if (username || email) {
+        const assignedRes = await client.query(
+          `
+          SELECT id 
+          FROM department_head_leads 
+          WHERE 
+            LOWER(COALESCE(assigned_salesperson, '')) = ANY($1::text[])
+            OR LOWER(COALESCE(assigned_telecaller, '')) = ANY($1::text[])
+          `,
+          [[username, email].filter(Boolean)]
+        );
+
+        const dhLeadIds = assignedRes.rows.map((row) => row.id);
+
+        if (dhLeadIds.length > 0) {
+          // Remove any salesperson_leads synced for these department_head_leads
+          await client.query(
+            'DELETE FROM salesperson_leads WHERE dh_lead_id = ANY($1::int[])',
+            [dhLeadIds]
+          );
+
+          // Unassign this user from the department_head_leads so a new user
+          // with the same username/email does NOT inherit old leads
+          await client.query(
+            `
+            UPDATE department_head_leads
+            SET assigned_salesperson = NULL,
+                assigned_telecaller = NULL
+            WHERE id = ANY($1::int[])
+            `,
+            [dhLeadIds]
+          );
+        }
+      }
 
       await client.query('COMMIT');
       logger.info('Department user data cleanup completed', { userId: user.id, email: user.email });
