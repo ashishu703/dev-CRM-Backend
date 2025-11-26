@@ -13,11 +13,12 @@ class DepartmentHead extends BaseModel {
     this.validateData({ username, email, departmentType, companyName, target });
     
     const hashedPassword = await bcrypt.hash(password, 12);
+    const targetStartDate = target && parseFloat(target) > 0 ? new Date().toISOString() : null;
     
     const result = await this.query(
-      `INSERT INTO ${this.TABLE_NAME} (username, email, password, department_type, company_name, target, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [username, email, hashedPassword, departmentType, companyName, target, createdBy]
+      `INSERT INTO ${this.TABLE_NAME} (username, email, password, department_type, company_name, target, target_start_date, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [username, email, hashedPassword, departmentType, companyName, target, targetStartDate, createdBy]
     );
 
     return new this(result.rows[0]);
@@ -169,20 +170,36 @@ class DepartmentHead extends BaseModel {
     return now > monthEnd;
   }
 
-  // Get days remaining until target expires (month end logic)
-  getTargetDaysRemaining() {
-    if (!this.target_start_date) return null;
-    const startDate = new Date(this.target_start_date);
-    const now = new Date();
-    
-    // Calculate month end from start date (target expires at end of the month it started)
-    const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
+  // Calculate target end date (end of month from start date). Optionally fallback to current month.
+  getTargetEndDate(allowFallback = false) {
+    let referenceDate = null;
+    if (this.target_start_date) {
+      referenceDate = new Date(this.target_start_date);
+    } else if (allowFallback) {
+      const now = new Date();
+      referenceDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    }
+
+    if (!referenceDate) return null;
+
+    const monthEnd = new Date(referenceDate.getFullYear(), referenceDate.getMonth() + 1, 0);
     monthEnd.setHours(23, 59, 59, 999);
-    
-    // Calculate days remaining until month end
-    if (monthEnd < now) return 0;
-    const diffTime = monthEnd - now;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return monthEnd;
+  }
+
+  // Get days remaining until target expires (month end logic). Falls back to current month when no start date.
+  getTargetDaysRemaining(allowFallback = true) {
+    const monthEnd = this.getTargetEndDate(allowFallback);
+    if (!monthEnd) return null;
+
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endDay = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), monthEnd.getDate());
+
+    if (endDay < today) return 0;
+
+    const diffTime = endDay - today;
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
     return Math.max(0, diffDays);
   }
 
@@ -221,12 +238,16 @@ class DepartmentHead extends BaseModel {
     // Add target expiration information
     if (this.target_start_date) {
       json.targetExpired = this.isTargetExpired();
-      json.targetDaysRemaining = this.getTargetDaysRemaining();
+      json.targetDaysRemaining = this.getTargetDaysRemaining(false);
       json.targetStartDate = this.target_start_date;
+      const endDate = this.getTargetEndDate(false);
+      json.targetEndDate = endDate ? endDate.toISOString() : null;
     } else {
       json.targetExpired = false;
-      json.targetDaysRemaining = null;
+      json.targetDaysRemaining = this.getTargetDaysRemaining(true);
       json.targetStartDate = null;
+      const fallbackEndDate = this.getTargetEndDate(true);
+      json.targetEndDate = fallbackEndDate ? fallbackEndDate.toISOString() : null;
     }
     
     return json;
