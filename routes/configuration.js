@@ -18,6 +18,12 @@ router.post('/whatsapp', configurationController.saveWhatsApp);
 // Cloudinary configuration
 router.post('/cloudinary', configurationController.saveCloudinary);
 
+// Indiamart configuration
+router.post('/indiamart', configurationController.saveIndiamart);
+
+// TradeIndia configuration
+router.post('/tradeindia', configurationController.saveTradeIndia);
+
 // Global settings
 router.get('/global', configurationController.getGlobalSettings);
 router.post('/global', configurationController.setGlobalSetting);

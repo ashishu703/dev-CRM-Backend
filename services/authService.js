@@ -104,7 +104,7 @@ class AuthService {
       }
 
       if (!user.is_active) {
-        throw new Error('Target user account is deactivated');
+        throw new Error('User is inactive. Contact your department head.');
       }
 
       // If impersonator is department head, allow only impersonation of own users
@@ -203,7 +203,7 @@ class AuthService {
       }
 
       if (!user.is_active) {
-        throw new Error('Account is deactivated');
+        throw new Error('User is inactive. Contact your department head.');
       }
 
       const isPasswordValid = await user.verifyPassword(password);

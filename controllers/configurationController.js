@@ -8,10 +8,12 @@ class ConfigurationController {
    */
   async getAll(req, res) {
     try {
-      const [emailConfig, whatsappConfig, cloudinaryConfig, templates] = await Promise.all([
+      const [emailConfig, whatsappConfig, cloudinaryConfig, indiamartConfig, tradeindiaConfig, templates] = await Promise.all([
         Configuration.getEmailConfiguration(),
         Configuration.getWhatsAppConfiguration(),
         Configuration.getCloudinaryConfiguration(),
+        Configuration.getIndiamartConfiguration(),
+        Configuration.getTradeIndiaConfiguration(),
         Configuration.getEmailTemplates()
       ]);
 
@@ -21,6 +23,8 @@ class ConfigurationController {
           email: emailConfig,
           whatsapp: whatsappConfig,
           cloudinary: cloudinaryConfig,
+          indiamart: indiamartConfig,
+          tradeindia: tradeindiaConfig,
           templates
         }
       });
@@ -272,6 +276,50 @@ class ConfigurationController {
       res.status(500).json({
         success: false,
         message: 'Failed to delete email template',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Save Indiamart configuration
+   */
+  async saveIndiamart(req, res) {
+    try {
+      const config = await Configuration.saveIndiamartConfiguration(req.body);
+      
+      res.json({
+        success: true,
+        message: 'Indiamart configuration saved successfully',
+        data: config
+      });
+    } catch (error) {
+      logger.error('Error saving Indiamart configuration:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save Indiamart configuration',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Save TradeIndia configuration
+   */
+  async saveTradeIndia(req, res) {
+    try {
+      const config = await Configuration.saveTradeIndiaConfiguration(req.body);
+      
+      res.json({
+        success: true,
+        message: 'TradeIndia configuration saved successfully',
+        data: config
+      });
+    } catch (error) {
+      logger.error('Error saving TradeIndia configuration:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save TradeIndia configuration',
         error: error.message
       });
     }

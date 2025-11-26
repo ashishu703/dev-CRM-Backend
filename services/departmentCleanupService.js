@@ -81,7 +81,9 @@ class DepartmentCleanupService {
       // 1) Delete any documents the user created (quotations, PIs, leads, payments)
       await this.deleteDocumentsForEmails(client, [user.email]);
 
-      // 2) Clean up leads where this user was assigned as salesperson or telecaller
+      // 2) Delete leads where this user was assigned as salesperson or telecaller
+      // IMPORTANT: Delete (not just unassign) to prevent old leads from reappearing
+      // when a new user is created with the same email/username
       const username = (user.username || '').toLowerCase().trim();
       const email = (user.email || '').toLowerCase().trim();
 
@@ -106,15 +108,10 @@ class DepartmentCleanupService {
             [dhLeadIds]
           );
 
-          // Unassign this user from the department_head_leads so a new user
-          // with the same username/email does NOT inherit old leads
+          // DELETE (not just unassign) the department_head_leads to prevent
+          // old leads from reappearing when a new user is created with same email/username
           await client.query(
-            `
-            UPDATE department_head_leads
-            SET assigned_salesperson = NULL,
-                assigned_telecaller = NULL
-            WHERE id = ANY($1::int[])
-            `,
+            'DELETE FROM department_head_leads WHERE id = ANY($1::int[])',
             [dhLeadIds]
           );
         }

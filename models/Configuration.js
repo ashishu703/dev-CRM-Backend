@@ -210,6 +210,74 @@ class Configuration {
     );
     return result.rows[0];
   }
+
+  /**
+   * Get Indiamart configuration
+   */
+  static async getIndiamartConfiguration() {
+    const result = await query(
+      'SELECT * FROM indiamart_configuration WHERE is_active = true ORDER BY created_at DESC LIMIT 1'
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Save Indiamart configuration
+   */
+  static async saveIndiamartConfiguration(config) {
+    // Deactivate all existing configurations
+    await query('UPDATE indiamart_configuration SET is_active = false');
+
+    const result = await query(
+      `INSERT INTO indiamart_configuration (
+        api_key, api_secret, access_token, refresh_token, token_expires_at, webhook_url, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, true)
+      RETURNING *`,
+      [
+        config.apiKey,
+        config.apiSecret,
+        config.accessToken || null,
+        config.refreshToken || null,
+        config.tokenExpiresAt || null,
+        config.webhookUrl || null
+      ]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Get TradeIndia configuration
+   */
+  static async getTradeIndiaConfiguration() {
+    const result = await query(
+      'SELECT * FROM tradeindia_configuration WHERE is_active = true ORDER BY created_at DESC LIMIT 1'
+    );
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Save TradeIndia configuration
+   */
+  static async saveTradeIndiaConfiguration(config) {
+    // Deactivate all existing configurations
+    await query('UPDATE tradeindia_configuration SET is_active = false');
+
+    const result = await query(
+      `INSERT INTO tradeindia_configuration (
+        api_key, api_secret, access_token, refresh_token, token_expires_at, webhook_url, is_active
+      ) VALUES ($1, $2, $3, $4, $5, $6, true)
+      RETURNING *`,
+      [
+        config.apiKey,
+        config.apiSecret,
+        config.accessToken || null,
+        config.refreshToken || null,
+        config.tokenExpiresAt || null,
+        config.webhookUrl || null
+      ]
+    );
+    return result.rows[0];
+  }
 }
 
 module.exports = Configuration;
