@@ -17,7 +17,10 @@ class SalespersonLeadController {
       if (!username) {
         return res.status(400).json({ success: false, message: 'Username not available in token' });
       }
-      const rows = await SalespersonLead.listForUser(username);
+      // STRICT CHECK: Filter by department and company to prevent cross-department access
+      const departmentType = req.user?.departmentType || null;
+      const companyName = req.user?.companyName || null;
+      const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
       return res.json({ success: true, data: rows });
     } catch (error) {
       console.error('Error fetching salesperson leads (self):', error);
@@ -31,7 +34,10 @@ class SalespersonLeadController {
       if (!username) {
         return res.status(400).json({ success: false, message: 'Username is required' });
       }
-      const rows = await SalespersonLead.listForUser(username);
+      // STRICT CHECK: Filter by department and company to prevent cross-department access
+      const departmentType = req.user?.departmentType || null;
+      const companyName = req.user?.companyName || null;
+      const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
       return res.json({ success: true, data: rows });
     } catch (error) {
       console.error('Error fetching salesperson leads (by username):', error);

@@ -78,15 +78,35 @@ class SalespersonLead extends BaseModel {
     return await SalespersonLead.query(query, values);
   }
 
-  async listForUser(username) {
+  async listForUser(username, departmentType = null, companyName = null) {
+    const conditions = [];
+    const values = [username];
+    let paramCount = 2;
+    
+    conditions.push(`COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($1))`);
+    
+    if (departmentType) {
+      conditions.push(`dh.department_type = $${paramCount}`);
+      values.push(departmentType);
+      paramCount++;
+    }
+    
+    if (companyName) {
+      conditions.push(`dh.company_name = $${paramCount}`);
+      values.push(companyName);
+      paramCount++;
+    }
+    
     const query = `
       SELECT sl.*
       FROM salesperson_leads sl
       JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
-      WHERE COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($1))
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE ${conditions.join(' AND ')}
       ORDER BY sl.id ASC
     `;
-    const result = await SalespersonLead.query(query, [username]);
+    
+    const result = await SalespersonLead.query(query, values);
     return result.rows || [];
   }
 
