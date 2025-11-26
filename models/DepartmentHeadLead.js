@@ -106,7 +106,54 @@ class DepartmentHeadLead extends BaseModel {
       existingPhoneSet = new Set((res.rows || []).map(r => (r.phone || '').toString().trim()));
     }
 
-    const filteredRows = rows.filter(r => {
+    // Check for existing customer_ids in database to avoid constraint violations
+    const customerIds = rows.map(r => r.customerId).filter(id => id != null && id !== '');
+    let existingCustomerIdSet = new Set();
+    if (customerIds.length > 0) {
+      const placeholdersCustomerIds = customerIds.map((_, idx) => `$${idx + 1}`).join(',');
+      const q = `SELECT customer_id FROM department_head_leads WHERE customer_id IN (${placeholdersCustomerIds})`;
+      const res = await DepartmentHeadLead.query(q, customerIds);
+      existingCustomerIdSet = new Set((res.rows || []).map(r => r.customer_id).filter(Boolean));
+    }
+
+    // Track customer_ids used in this batch to avoid duplicates within the batch
+    const usedCustomerIdsInBatch = new Set();
+    
+    // Generate unique customer_ids for rows that don't have one or have duplicates
+    const rowsWithUniqueIds = rows.map((r, idx) => {
+      let customerId = r.customerId || null;
+      
+      // If customerId exists but is duplicate (in DB or in batch), generate new one
+      if (customerId && (existingCustomerIdSet.has(customerId) || usedCustomerIdsInBatch.has(customerId))) {
+        customerId = null; // Will be generated below
+      }
+      
+      // Generate customerId if not provided or was duplicate
+      if (!customerId) {
+        let newId;
+        let attempts = 0;
+        do {
+          newId = this.generateCustomerId();
+          attempts++;
+          // Prevent infinite loop
+          if (attempts > 100) {
+            newId = `CUST-${Date.now()}-${idx}-${Math.floor(Math.random() * 10000)}`;
+            break;
+          }
+        } while (existingCustomerIdSet.has(newId) || usedCustomerIdsInBatch.has(newId));
+        
+        customerId = newId;
+      }
+      
+      usedCustomerIdsInBatch.add(customerId);
+      
+      return {
+        ...r,
+        customerId: customerId
+      };
+    });
+
+    const filteredRows = rowsWithUniqueIds.filter(r => {
       const name = (r.customer || '').toString().trim();
       const p = (r.phone || '').toString().trim();
       // Skip rows that are effectively empty (no name and no phone)
@@ -135,6 +182,7 @@ class DepartmentHeadLead extends BaseModel {
         whatsapp, assigned_salesperson, assigned_telecaller,
         created_by, created_at, updated_at
       ) VALUES ${placeholders}
+      ON CONFLICT (customer_id) DO NOTHING
       RETURNING id
     `;
 
@@ -169,7 +217,7 @@ class DepartmentHeadLead extends BaseModel {
       }
       
       return [
-        r.customerId || this.generateCustomerId(),
+        r.customerId, // Now guaranteed to be unique
         customer || null,
         r.email || null,
         r.business || null,
@@ -194,7 +242,7 @@ class DepartmentHeadLead extends BaseModel {
     });
     const insertResult = await DepartmentHeadLead.query(query, values);
     const duplicatesCount = rows.length - filteredRows.length;
-    return { rowCount: insertResult.rowCount, rows: insertResult.rows, duplicatesCount };
+    return { rowCount: insertResult.rowCount || 0, rows: insertResult.rows || [], duplicatesCount };
   }
 
   async getAll(filters = {}, pagination = {}) {
