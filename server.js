@@ -115,6 +115,8 @@ app.use('/api/proforma-invoices', proformaInvoiceRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/configuration', configurationRoutes);
 app.use('/api/upload', uploadRoutes);
+const productImageRoutes = require('./routes/productImages');
+app.use('/api/product-images', productImageRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler
