@@ -166,6 +166,21 @@ class SalespersonLead extends BaseModel {
     const result = await SalespersonLead.query(sql, values);
     return { rowCount: result.rowCount, row: result.rows && result.rows[0] };
   }
+
+  async transferLead(id, transferredTo, transferredFrom, reason = '') {
+    const query = `
+      UPDATE salesperson_leads
+      SET 
+        transferred_to = $1,
+        transferred_from = $2,
+        transferred_at = NOW(),
+        transfer_reason = $3,
+        updated_at = NOW()
+      WHERE id = $4
+    `;
+    const values = [transferredTo, transferredFrom, reason, id];
+    return await SalespersonLead.query(query, values);
+  }
 }
 
 module.exports = new SalespersonLead();
