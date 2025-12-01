@@ -32,3 +32,5 @@ CREATE TRIGGER update_product_images_updated_at_trigger
 BEFORE UPDATE ON product_images
 FOR EACH ROW EXECUTE FUNCTION update_product_images_updated_at();
 
+
+
