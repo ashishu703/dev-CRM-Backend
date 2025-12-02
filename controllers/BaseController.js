@@ -19,7 +19,7 @@ class BaseController {
   }
 
   static validateRequiredFields(fields, data) {
-    const missing = fields.filter(field => !data[field]);
+    const missing = fields.filter(field => data[field] === undefined || data[field] === null || data[field] === '');
     if (missing.length > 0) {
       throw new Error(`Missing required fields: ${missing.join(', ')}`);
     }

@@ -20,6 +20,8 @@ const proformaInvoiceRoutes = require('./routes/proformaInvoices');
 const notificationRoutes = require('./routes/notifications');
 const configurationRoutes = require('./routes/configuration');
 const uploadRoutes = require('./routes/upload');
+const ticketRoutes = require('./routes/tickets');
+const securityLogRoutes = require('./routes/securityLogs');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -115,6 +117,8 @@ app.use('/api/proforma-invoices', proformaInvoiceRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/configuration', configurationRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/tickets', ticketRoutes);
+app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler
