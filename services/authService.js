@@ -81,20 +81,18 @@ class AuthService {
       let user = null;
       let userType = null;
       
-      // If impersonator is department head, prioritize finding as department user
       if (decoded.type === 'department_head') {
-        user = await DepartmentUser.findByEmail(email);
+        user = await DepartmentUser.findByEmail(email, true);
         userType = 'department_user';
         if (!user) {
-          user = await DepartmentHead.findByEmail(email);
+          user = await DepartmentHead.findByEmail(email, true);
           userType = 'department_head';
         }
       } else {
-        // For superadmin, check department head first
-        user = await DepartmentHead.findByEmail(email);
+        user = await DepartmentHead.findByEmail(email, true);
         userType = 'department_head';
         if (!user) {
-          user = await DepartmentUser.findByEmail(email);
+          user = await DepartmentUser.findByEmail(email, true);
           userType = 'department_user';
         }
       }
@@ -128,14 +126,19 @@ class AuthService {
         userType
       });
 
+      const departmentType = user.department_type || user.departmentType;
+      if (!departmentType) {
+        throw new Error('User department type not found');
+      }
+
       const userData = {
         id: user.id,
         username: user.username,
         email: user.email,
         role: userType === 'department_head' ? 'department_head' : 'department_user',
-        departmentType: user.department_type,
-        companyName: user.company_name,
-        uiUserType: this.mapUiUserType(userType, user.department_type)
+        departmentType: departmentType,
+        companyName: user.company_name || user.companyName,
+        uiUserType: this.mapUiUserType(userType, departmentType)
       };
 
       if (userType === 'department_head') {
@@ -221,14 +224,19 @@ class AuthService {
         userType
       });
 
+      const departmentType = user.department_type || user.departmentType;
+      if (!departmentType) {
+        throw new Error('User department type not found');
+      }
+
       const userData = {
         id: user.id,
         username: user.username,
         email: user.email,
         role: userType,
-        departmentType: user.department_type,
-        companyName: user.company_name,
-        uiUserType: this.mapUiUserType(userType, user.department_type)
+        departmentType: departmentType,
+        companyName: user.company_name || user.companyName,
+        uiUserType: this.mapUiUserType(userType, departmentType)
       };
 
       if (userType === 'department_head') {
@@ -399,12 +407,12 @@ class AuthService {
         username: user.username,
         email: user.email,
         role: userType,
-        departmentType: user.department_type,
-        companyName: user.company_name,
-        uiUserType: this.mapUiUserType(userType, user.department_type),
-        isActive: user.is_active,
-        createdAt: user.created_at,
-        updatedAt: user.updated_at
+        departmentType: user.department_type || user.departmentType,
+        companyName: user.company_name || user.companyName,
+        uiUserType: this.mapUiUserType(userType, user.department_type || user.departmentType),
+        isActive: user.is_active !== undefined ? user.is_active : (user.isActive !== undefined ? user.isActive : true),
+        createdAt: user.created_at || user.createdAt,
+        updatedAt: user.updated_at || user.updatedAt
       };
 
       if (userType === 'department_head') {

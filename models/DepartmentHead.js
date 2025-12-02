@@ -24,7 +24,14 @@ class DepartmentHead extends BaseModel {
     return new this(result.rows[0]);
   }
 
-  static async findByEmail(email) {
+  static async findByEmail(email, includeInactive = false) {
+    if (includeInactive) {
+      const result = await this.query(
+        `SELECT * FROM ${this.TABLE_NAME} WHERE LOWER(email) = LOWER($1)`,
+        [email]
+      );
+      return result.rows.length > 0 ? new this(result.rows[0]) : null;
+    }
     return await this.findByField(this.TABLE_NAME, 'email', email);
   }
 

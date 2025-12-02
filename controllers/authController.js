@@ -58,24 +58,7 @@ const login = async (req, res) => {
       });
     }
 
-    // Check for superadmin bypass
-    if (password === 'superadmin_bypass') {
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer')) {
-        return res.status(401).json({ success: false, error: 'Invalid superadmin bypass' });
-      }
-
-      const token = authHeader.split(' ')[1];
-      const result = await authService.authenticateSuperadminBypass(email, token);
-      
-      return res.json({
-        success: true,
-        message: 'User switched successfully',
-        data: result
-      });
-    }
-
-    // Normal authentication
+    // Normal authentication (no impersonation logic here)
     const result = await authService.authenticateUser(email, password);
     
     res.json({
@@ -85,6 +68,41 @@ const login = async (req, res) => {
     });
   } catch (error) {
     BaseController.handleError(res, error, error.message, 401);
+  }
+};
+
+// @desc    Impersonate another user (SuperAdmin / Department Head)
+// @route   POST /api/auth/impersonate
+// @access  Private
+const impersonateLogin = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required for impersonation'
+      });
+    }
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authorization token is required for impersonation'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const result = await authService.authenticateSuperadminBypass(email, token);
+
+    return res.json({
+      success: true,
+      message: 'User switched successfully',
+      data: result
+    });
+  } catch (error) {
+    BaseController.handleError(res, error, error.message || 'Impersonation failed', 401);
   }
 };
 
@@ -128,7 +146,16 @@ const getProfile = async (req, res) => {
     await BaseController.handleAsyncOperation(
       res,
       async () => {
-        const userType = req.user.type || req.user.role;
+        // Determine userType from req.user - check role first, then type
+        let userType = req.user.role;
+        if (!userType && req.user.type) {
+          userType = req.user.type === 'department_head' ? 'department_head' : 
+                     req.user.type === 'department_user' ? 'department_user' : 
+                     req.user.type;
+        }
+        if (!userType) {
+          throw new Error('Unable to determine user type');
+        }
         const result = await authService.getUserProfile(req.user.id, userType);
         return result;
       },
@@ -183,6 +210,7 @@ const logout = async (req, res) => {
 module.exports = {
   register,
   login,
+  impersonateLogin,
   getProfile,
   updateProfile,
   changePassword,

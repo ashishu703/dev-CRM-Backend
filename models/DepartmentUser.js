@@ -24,12 +24,11 @@ class DepartmentUser extends BaseModel {
     return new this(result.rows[0]);
   }
 
-  static async findByEmail(email) {
-    // Only find active users (hard delete means record is gone, but check is_active for safety)
-    const result = await this.query(
-      `SELECT * FROM ${this.TABLE_NAME} WHERE email = $1 AND is_active = true`,
-      [email]
-    );
+  static async findByEmail(email, includeInactive = false) {
+    const queryText = includeInactive
+      ? `SELECT * FROM ${this.TABLE_NAME} WHERE LOWER(email) = LOWER($1)`
+      : `SELECT * FROM ${this.TABLE_NAME} WHERE LOWER(email) = LOWER($1) AND is_active = true`;
+    const result = await this.query(queryText, [email]);
     return result.rows.length > 0 ? new this(result.rows[0]) : null;
   }
 
