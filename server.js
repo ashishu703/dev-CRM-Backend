@@ -117,6 +117,8 @@ app.use('/api/configuration', configurationRoutes);
 app.use('/api/upload', uploadRoutes);
 const productImageRoutes = require('./routes/productImages');
 app.use('/api/product-images', productImageRoutes);
+const stockRoutes = require('./routes/stock');
+app.use('/api/stock', stockRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler

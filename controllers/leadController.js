@@ -343,11 +343,11 @@ class LeadController {
 
       if (!result || result.rowCount === 0) {
         result = await SalespersonLead.transferLead(id, transferredTo, transferredFrom, reason);
-        if (!result || result.rowCount === 0) {
-          return res.status(404).json({
-            success: false,
-            message: 'Lead not found'
-          });
+      if (!result || result.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Lead not found'
+        });
         }
       }
 
