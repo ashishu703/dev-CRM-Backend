@@ -21,9 +21,10 @@ class Quotation extends BaseModel {
           customer_name, customer_business, customer_phone, customer_email, 
           customer_address, customer_gst_no, customer_state,
           quotation_date, valid_until, branch,
-          subtotal, tax_rate, tax_amount, discount_rate, discount_amount, total_amount
+          subtotal, tax_rate, tax_amount, discount_rate, discount_amount, total_amount,
+          template
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
         ) RETURNING *
       `;
       
@@ -51,7 +52,8 @@ class Quotation extends BaseModel {
         quotationData.taxAmount,
         quotationData.discountRate || 0,
         quotationData.discountAmount || 0,
-        quotationData.totalAmount
+        quotationData.totalAmount,
+        quotationData.template || 'template1'
       ];
       
       const quotationResult = await query(quotationQuery, quotationValues);

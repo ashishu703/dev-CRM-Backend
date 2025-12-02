@@ -33,7 +33,8 @@ class QuotationController {
         discountRate: req.body.discountRate || 0,
         discountAmount: req.body.discountAmount || 0,
         totalAmount: req.body.totalAmount,
-        status: req.body.status || 'draft'
+        status: req.body.status || 'draft',
+        template: req.body.template || 'template1'
       };
 
       const items = req.body.items || [];
