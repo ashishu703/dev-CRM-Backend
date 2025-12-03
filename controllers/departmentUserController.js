@@ -152,6 +152,11 @@ class DepartmentUserController extends BaseController {
           const target = parseFloat(userJson.target || 0);
           userJson.remaining_target = target - recalculatedAchieved;
           
+          // Ensure camelCase fields are present for frontend compatibility
+          userJson.isActive = userJson.is_active !== undefined ? userJson.is_active : userJson.isActive;
+          userJson.departmentType = userJson.department_type || userJson.departmentType;
+          userJson.lastLogin = userJson.last_login || userJson.lastLogin;
+          
           return userJson;
         })
       );
@@ -395,7 +400,7 @@ class DepartmentUserController extends BaseController {
         query(
           `SELECT dh.username as head_username, dh.email as head_email, COUNT(du.id) as user_count
            FROM department_heads dh 
-           LEFT JOIN department_users du ON dh.id = du.head_user_id ${whereClause.replace('du.', '')}
+           LEFT JOIN department_users du ON dh.id = du.head_user_id ${whereClause}
            GROUP BY dh.id, dh.username, dh.email ORDER BY user_count DESC`,
           values
         ),

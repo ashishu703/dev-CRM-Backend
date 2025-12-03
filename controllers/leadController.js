@@ -2,6 +2,7 @@ const Lead = require('../models/Lead');
 const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const { validationResult } = require('express-validator');
 const leadAssignmentService = require('../services/leadAssignmentService');
+const SalespersonLead = require('../models/SalespersonLead');
 
 class LeadController {
   // Create a new lead
@@ -338,13 +339,37 @@ class LeadController {
       const { transferredTo, reason } = req.body;
       const transferredFrom = req.user.email;
 
-      const result = await Lead.transferLead(id, transferredTo, transferredFrom, reason);
+      let result = await Lead.transferLead(id, transferredTo, transferredFrom, reason);
 
+      if (!result || result.rowCount === 0) {
+        result = await SalespersonLead.transferLead(id, transferredTo, transferredFrom, reason);
       if (!result || result.rowCount === 0) {
         return res.status(404).json({
           success: false,
           message: 'Lead not found'
         });
+        }
+      }
+
+      // Update assigned salesperson and transfer info on department_head_leads
+      try {
+        await DepartmentHeadLead.transferLead(id, transferredTo, transferredFrom, reason);
+        await leadAssignmentService.syncSalespersonLead(id);
+      } catch (syncError) {
+        console.error('Lead transfer sync warning:', syncError);
+        // Fallback: just update assigned salesperson
+        try {
+          await DepartmentHeadLead.updateById(
+            id,
+            { assignedSalesperson: transferredTo },
+            null,
+            null,
+            null
+          );
+          await leadAssignmentService.syncSalespersonLead(id);
+        } catch (fallbackError) {
+          console.error('Lead transfer fallback error:', fallbackError);
+        }
       }
 
       res.json({

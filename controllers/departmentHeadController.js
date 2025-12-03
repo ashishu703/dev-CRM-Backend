@@ -50,7 +50,6 @@ class DepartmentHeadController extends BaseController {
       const effectiveFilters = { ...baseFilters };
       if (req.user.role === 'department_head') {
         effectiveFilters.companyName = req.user.companyName;
-        effectiveFilters.departmentType = req.user.departmentType;
       }
 
       const pagination = { page: parseInt(page), limit: parseInt(limit) };

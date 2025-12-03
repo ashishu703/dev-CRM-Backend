@@ -59,6 +59,25 @@ router.get('/', async (req, res) => {
        LIMIT 25`
     );
 
+    // Recently transferred leads assigned to this user
+    const transferRes = await query(
+      `SELECT sl.id, sl.name AS customer_name, sl.business, sl.product_type, sl.phone, sl.email, sl.address, sl.state,
+              sl.transferred_to, sl.transferred_from, sl.transferred_at
+       FROM salesperson_leads sl
+       WHERE sl.transferred_to IS NOT NULL
+         AND sl.transferred_at IS NOT NULL
+         AND (
+           LOWER(COALESCE(sl.transferred_to, '')) = ANY($1)
+           OR LOWER(COALESCE(sl.transferred_to, '')) LIKE ANY(ARRAY(
+             SELECT '%' || i || '%' FROM unnest($1::text[]) AS i
+           ))
+         )
+         AND sl.transferred_at >= NOW() - INTERVAL '14 days'
+       ORDER BY sl.transferred_at DESC
+       LIMIT 25`,
+      [identifiers]
+    );
+
     // Normalize into a single list
     const notifications = [];
 
@@ -96,6 +115,26 @@ router.get('/', async (req, res) => {
       message: `${r.customer_name || 'Customer'} has ₹${Number(r.remaining_amount).toLocaleString()} due`,
       time: r.created_at,
       unread: true,
+    }));
+
+    transferRes.rows.forEach(r => notifications.push({
+      id: `transfer-${r.id}-${r.transferred_at?.toISOString?.() || Date.now()}`,
+      type: 'transfer',
+      title: `Lead transferred from ${r.transferred_from || 'colleague'}`,
+      message: `${r.customer_name || 'Customer'} assigned to you`,
+      time: r.transferred_at || new Date(),
+      unread: true,
+      details: {
+        customer: r.customer_name || 'N/A',
+        business: r.business || 'N/A',
+        product: r.product_type || 'N/A',
+        phone: r.phone || 'N/A',
+        email: r.email || 'N/A',
+        address: r.address || 'N/A',
+        state: r.state || 'N/A',
+        transferredFrom: r.transferred_from || 'N/A',
+        transferredAt: r.transferred_at
+      }
     }));
 
     // Sort newest first

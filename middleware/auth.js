@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const SuperAdmin = require('../models/SuperAdmin');
 const DepartmentHead = require('../models/DepartmentHead');
 const DepartmentUser = require('../models/DepartmentUser');
+const AdminDepartmentUser = require('../models/AdminDepartmentUser');
 const logger = require('../utils/logger');
 
 // Protect routes - verify JWT token

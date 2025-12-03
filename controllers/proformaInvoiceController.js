@@ -4,10 +4,10 @@ class ProformaInvoiceController {
   // Get all PIs (for department head)
   async getAll(req, res) {
     try {
-      // STRICT CHECK: Filter by logged-in user's department and company
       const pis = await ProformaInvoice.getAll(
         req.user.departmentType,
-        req.user.companyName
+        req.user.companyName,
+        req.user.email
       );
       
       res.json({
