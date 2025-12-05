@@ -10,3 +10,4 @@ COMMENT ON COLUMN quotations.template IS 'Template identifier: template1 (Classi
 -- Create index for faster queries by template
 CREATE INDEX IF NOT EXISTS idx_quotations_template ON quotations(template);
 
+

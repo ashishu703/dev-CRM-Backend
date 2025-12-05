@@ -10,3 +10,4 @@ COMMENT ON COLUMN proforma_invoices.template IS 'Template identifier: template1 
 -- Create index for faster queries by template
 CREATE INDEX IF NOT EXISTS idx_proforma_invoices_template ON proforma_invoices(template);
 
+
