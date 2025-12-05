@@ -351,18 +351,25 @@ class LeadController {
         }
       }
 
-      // Update assigned salesperson on department_head_leads so new user owns it
+      // Update assigned salesperson and transfer info on department_head_leads
       try {
-        await DepartmentHeadLead.updateById(
-          id,
-          { assignedSalesperson: transferredTo },
-          null,
-          null,
-          null
-        );
+        await DepartmentHeadLead.transferLead(id, transferredTo, transferredFrom, reason);
         await leadAssignmentService.syncSalespersonLead(id);
       } catch (syncError) {
         console.error('Lead transfer sync warning:', syncError);
+        // Fallback: just update assigned salesperson
+        try {
+          await DepartmentHeadLead.updateById(
+            id,
+            { assignedSalesperson: transferredTo },
+            null,
+            null,
+            null
+          );
+          await leadAssignmentService.syncSalespersonLead(id);
+        } catch (fallbackError) {
+          console.error('Lead transfer fallback error:', fallbackError);
+        }
       }
 
       res.json({

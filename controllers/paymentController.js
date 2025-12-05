@@ -20,6 +20,7 @@ class PaymentController {
         payment_method,
         payment_date,
         payment_reference: customReference,
+        payment_receipt_url,
         remarks,
         notes,
         purchase_order_id,
@@ -75,11 +76,11 @@ class PaymentController {
 
         quotationTotal = Number(quotation.total_amount);
 
-        // Calculate paid amount so far
+        // Calculate paid amount so far (only approved payments)
         const paidRes = await client.query(
           `SELECT COALESCE(SUM(installment_amount), 0) as paid
            FROM payment_history
-           WHERE quotation_id = $1 AND payment_status = 'completed' AND is_refund = false`,
+           WHERE quotation_id = $1 AND approval_status = 'approved' AND is_refund = false`,
           [safeQuotationId]
         );
         paidSoFar = Number(paidRes.rows[0].paid);
@@ -160,7 +161,7 @@ class PaymentController {
       // Calculate total paid after this installment
       const totalPaidAfter = paidSoFar + appliedToQuotation;
 
-      // Insert payment record
+      // Insert payment record with pending approval status
       const insertQuery = `
         INSERT INTO payment_history (
           lead_id,
@@ -178,6 +179,8 @@ class PaymentController {
           payment_method,
           payment_reference,
           payment_status,
+          approval_status,
+          payment_receipt_url,
           available_credit,
           overpaid_amount,
           purchase_order_id,
@@ -188,8 +191,8 @@ class PaymentController {
           payment_date,
           created_at
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'completed',
-          $15, $16, $17, $18, $19, $20, $21, COALESCE($22, NOW()), NOW()
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+          $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW()
         ) RETURNING *
       `;
 
@@ -208,6 +211,9 @@ class PaymentController {
         installmentAmt,
         payment_method,
         paymentReference,
+        'pending', // payment_status
+        'pending', // approval_status
+        payment_receipt_url || null,
         availableCredit,
         overpaidAmount,
         purchase_order_id || quotation?.work_order_id || null,
@@ -218,13 +224,8 @@ class PaymentController {
         payment_date
       ]);
 
-      // Update quotation status if fully paid
-      if (safeQuotationId && remainingAfter === 0 && quotation.status !== 'completed') {
-        await client.query(
-          `UPDATE quotations SET status = 'completed', updated_at = NOW() WHERE id = $1`,
-          [safeQuotationId]
-        );
-      }
+      // Note: Quotation status will be updated to 'completed' only after payment is approved
+      // This is handled in the approval flow
 
       await client.query('COMMIT');
 
@@ -579,11 +580,15 @@ class PaymentController {
    * Update payment approval status (approved/pending/rejected)
    */
   async updateApprovalStatus(req, res) {
+    const client = await getClient();
     try {
+      await client.query('BEGIN');
+
       const { id } = req.params;
       const { status, notes } = req.body || {};
 
       if (!status) {
+        await client.query('ROLLBACK');
         return res.status(400).json({
           success: false,
           message: 'Status is required'
@@ -594,11 +599,57 @@ class PaymentController {
       const payment = await Payment.updateApprovalStatus(id, status, actionBy, notes || null);
 
       if (!payment) {
+        await client.query('ROLLBACK');
         return res.status(404).json({
           success: false,
           message: 'Payment not found'
         });
       }
+
+      // If approved, update payment_status to 'completed' and check if quotation is fully paid
+      if (status === 'approved') {
+        await client.query(
+          `UPDATE payment_history 
+           SET payment_status = 'completed', updated_at = NOW() 
+           WHERE id = $1`,
+          [id]
+        );
+
+        // Check if quotation is fully paid and update status
+        if (payment.quotation_id) {
+          const totalRes = await client.query(
+            'SELECT total_amount FROM quotations WHERE id = $1',
+            [payment.quotation_id]
+          );
+          if (totalRes.rows.length > 0) {
+            const total = Number(totalRes.rows[0].total_amount || 0);
+            const paidRes = await client.query(
+              `SELECT COALESCE(SUM(installment_amount), 0) as paid
+               FROM payment_history
+               WHERE quotation_id = $1 AND approval_status = 'approved' AND is_refund = false`,
+              [payment.quotation_id]
+            );
+            const paid = Number(paidRes.rows[0]?.paid || 0);
+            
+            if (paid >= total) {
+              await client.query(
+                `UPDATE quotations SET status = 'completed', updated_at = NOW() WHERE id = $1`,
+                [payment.quotation_id]
+              );
+            }
+          }
+        }
+      } else if (status === 'rejected') {
+        // Keep payment_status as 'pending' for rejected payments
+        await client.query(
+          `UPDATE payment_history 
+           SET payment_status = 'pending', updated_at = NOW() 
+           WHERE id = $1`,
+          [id]
+        );
+      }
+
+      await client.query('COMMIT');
 
       res.json({
         success: true,
@@ -606,12 +657,15 @@ class PaymentController {
         data: payment
       });
     } catch (error) {
+      await client.query('ROLLBACK');
       console.error('Error updating payment approval status:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to update payment approval status',
         error: error.message
       });
+    } finally {
+      client.release();
     }
   }
 

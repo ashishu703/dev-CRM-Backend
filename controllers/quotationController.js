@@ -424,7 +424,7 @@ class QuotationController {
       const paidRes = await Quotation.constructor.query(
         `SELECT COALESCE(SUM(installment_amount),0) AS paid
            FROM payment_history
-          WHERE quotation_id = $1 AND payment_status = 'completed' AND is_refund = false`,
+          WHERE quotation_id = $1 AND approval_status = 'approved' AND is_refund = false`,
         [id]
       );
       const paid = Number(paidRes.rows[0]?.paid || 0);

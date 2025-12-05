@@ -413,8 +413,7 @@ class ProformaInvoice extends BaseModel {
     return result.rows[0];
   }
 
-  // Get all PIs (approved, rejected, pending)
-  async getAll(departmentType = null, companyName = null) {
+  async getAll(departmentType = null, companyName = null, createdBy = null) {
     await this.ensureSchema();
     let sql = `
       SELECT pi.*, 
@@ -425,21 +424,24 @@ class ProformaInvoice extends BaseModel {
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE 1=1
     `;
-    
     const values = [];
     let paramCount = 1;
 
-    // STRICT CHECK: Filter by department type if provided
     if (departmentType) {
       sql += ` AND dh.department_type = $${paramCount}`;
       values.push(departmentType);
       paramCount++;
     }
 
-    // STRICT CHECK: Filter by company name if provided
     if (companyName) {
       sql += ` AND dh.company_name = $${paramCount}`;
       values.push(companyName);
+      paramCount++;
+    }
+
+    if (createdBy) {
+      sql += ` AND dhl.created_by = $${paramCount}`;
+      values.push(createdBy);
     }
 
     sql += `

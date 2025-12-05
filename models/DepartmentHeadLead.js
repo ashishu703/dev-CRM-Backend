@@ -346,6 +346,7 @@ class DepartmentHeadLead extends BaseModel {
         dhl.phone, dhl.address, dhl.gst_no, dhl.state, dhl.customer_type, dhl.date,
         dhl.whatsapp, dhl.assigned_salesperson, dhl.assigned_telecaller,
         dhl.created_by, dhl.created_at, dhl.updated_at,
+        dhl.transferred_from, dhl.transferred_to, dhl.transferred_at, dhl.transfer_reason,
         sl.follow_up_status AS follow_up_status,
         sl.follow_up_remark AS follow_up_remark,
         sl.sales_status_remark AS sales_status_remark,
@@ -447,6 +448,30 @@ class DepartmentHeadLead extends BaseModel {
       paramCount++;
     }
 
+    return await DepartmentHeadLead.query(query, values);
+  }
+
+  /**
+   * Transfer a lead to another user
+   * @param {number} id - Lead ID
+   * @param {string} transferredTo - User email or name to transfer to
+   * @param {string} transferredFrom - User email transferring from
+   * @param {string} reason - Transfer reason
+   * @returns {Promise<Object>} Query result
+   */
+  async transferLead(id, transferredTo, transferredFrom, reason = '') {
+    const query = `
+      UPDATE department_head_leads 
+      SET 
+        assigned_salesperson = $1,
+        transferred_to = $2,
+        transferred_from = $3,
+        transferred_at = NOW(),
+        transfer_reason = $4,
+        updated_at = NOW()
+      WHERE id = $5
+    `;
+    const values = [transferredTo, transferredTo, transferredFrom, reason || '', id];
     return await DepartmentHeadLead.query(query, values);
   }
 
