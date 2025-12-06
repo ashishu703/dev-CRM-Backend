@@ -1,15 +1,14 @@
 const Joi = require('joi');
 const { validationResult } = require('express-validator');
 
-const DEPARTMENT_TYPES = ['marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales'];
-
 const schemas = {
   createUserSchema: Joi.object({
     username: Joi.string().min(3).max(255).required(),
     email: Joi.string().email().required(),
     password: Joi.string().min(6).required(),
     target: Joi.number().min(0).required(),
-    departmentType: Joi.string().valid(...DEPARTMENT_TYPES).optional(),
+    // departmentType is dynamic; just ensure it's a reasonable string when provided
+    departmentType: Joi.string().max(100).optional(),
     companyName: Joi.string().min(1).max(255).optional(),
     headUserId: Joi.string().uuid().optional(),
     headUserEmail: Joi.string().email().optional()
@@ -19,7 +18,7 @@ const schemas = {
     username: Joi.string().min(3).max(255).optional(),
     email: Joi.string().email().optional(),
     password: Joi.string().min(6).optional(),
-    departmentType: Joi.string().valid(...DEPARTMENT_TYPES).optional(),
+    departmentType: Joi.string().max(100).optional(),
     companyName: Joi.string().min(1).max(255).optional(),
     headUserId: Joi.string().uuid().optional(),
     target: Joi.number().min(0).optional(),
@@ -42,7 +41,8 @@ const schemas = {
     username: Joi.string().min(3).max(255).required(),
     email: Joi.string().email().required(),
     password: Joi.string().min(6).required(),
-    departmentType: Joi.string().valid(...DEPARTMENT_TYPES, 'telesales').required(),
+    // Accept any non-empty department label; routing is resolved at login time
+    departmentType: Joi.string().min(1).max(100).required(),
     companyName: Joi.string().min(1).max(255).required(),
     target: Joi.number().min(0).optional(),
     monthlyTarget: Joi.alternatives().try(
@@ -68,7 +68,8 @@ const schemas = {
     username: Joi.string().min(3).max(255).optional(),
     email: Joi.string().email().optional(),
     password: Joi.string().min(6).optional(),
-    departmentType: Joi.string().valid(...DEPARTMENT_TYPES).optional(),
+    // Department type is dynamic; simple string validation
+    departmentType: Joi.string().min(1).max(100).optional(),
     companyName: Joi.string().min(1).max(255).optional(),
     target: Joi.number().min(0).optional(),
     monthlyTarget: Joi.alternatives().try(
@@ -115,17 +116,17 @@ const schemas = {
         'any.required': 'Password is required'
       }),
     departmentType: Joi.string()
-      .valid(...DEPARTMENT_TYPES)
+      .min(1)
+      .max(100)
       .required()
       .messages({
-        'any.only': `Department type must be one of: ${DEPARTMENT_TYPES.join(', ')}`,
         'any.required': 'Department type is required'
       }),
     companyName: Joi.string()
-      .valid('Anode Electric Pvt. Ltd.', 'Anode Metals', 'Samrridhi Industries')
+      .min(1)
+      .max(255)
       .required()
       .messages({
-        'any.only': 'Company name must be one of: Anode Electric Pvt. Ltd., Anode Metals, Samrridhi Industries',
         'any.required': 'Company name is required'
       }),
     role: Joi.string()
@@ -264,6 +265,56 @@ const schemas = {
         'number.min': 'Limit must be at least 1',
         'number.max': 'Limit cannot exceed 100'
       })
+  }),
+
+  // Organization management
+  createOrganization: Joi.object({
+    organizationName: Joi.string().min(1).max(255).required(),
+    legalName: Joi.string().min(1).max(255).required(),
+    logoUrl: Joi.string().uri().max(500).optional().allow(''),
+    streetAddress: Joi.string().min(1).max(500).required(),
+    city: Joi.string().min(1).max(100).required(),
+    state: Joi.string().min(1).max(100).required(),
+    zipCode: Joi.string().min(1).max(20).required(),
+    country: Joi.string().min(1).max(100).default('India'),
+    phone: Joi.string().max(20).optional().allow(''),
+    email: Joi.string().email().optional().allow(''),
+    website: Joi.string().uri().optional().allow(''),
+    gstin: Joi.string().max(15).optional().allow(''),
+    pan: Joi.string().max(10).optional().allow(''),
+    tan: Joi.string().max(10).optional().allow(''),
+    currency: Joi.string().max(10).default('INR'),
+    fiscalYearStart: Joi.string().max(20).default('April'),
+    fiscalYearEnd: Joi.string().max(20).default('March'),
+    timezone: Joi.string().max(50).default('Asia/Kolkata')
+  }),
+
+  updateOrganization: Joi.object({
+    organizationName: Joi.string().min(1).max(255).optional(),
+    legalName: Joi.string().min(1).max(255).optional(),
+    logoUrl: Joi.string().uri().max(500).optional().allow(''),
+    streetAddress: Joi.string().min(1).max(500).optional(),
+    city: Joi.string().min(1).max(100).optional(),
+    state: Joi.string().min(1).max(100).optional(),
+    zipCode: Joi.string().min(1).max(20).optional(),
+    country: Joi.string().min(1).max(100).optional(),
+    phone: Joi.string().max(20).optional().allow(''),
+    email: Joi.string().email().optional().allow(''),
+    website: Joi.string().uri().optional().allow(''),
+    gstin: Joi.string().max(15).optional().allow(''),
+    pan: Joi.string().max(10).optional().allow(''),
+    tan: Joi.string().max(10).optional().allow(''),
+    currency: Joi.string().max(10).optional(),
+    fiscalYearStart: Joi.string().max(20).optional(),
+    fiscalYearEnd: Joi.string().max(20).optional(),
+    timezone: Joi.string().max(50).optional(),
+    isActive: Joi.boolean().optional()
+  }),
+
+  organizationQuery: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(50),
+    isActive: Joi.boolean().optional()
   })
 };
 

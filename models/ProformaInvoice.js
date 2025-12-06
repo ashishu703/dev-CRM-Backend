@@ -27,6 +27,7 @@ class ProformaInvoice extends BaseModel {
             total_amount NUMERIC(12,2) DEFAULT 0,
             total_paid NUMERIC(12,2) DEFAULT 0,
             remaining_balance NUMERIC(12,2) DEFAULT 0,
+            template VARCHAR(255),
             dispatch_mode VARCHAR(50),
             transport_name VARCHAR(255),
             vehicle_number VARCHAR(100),
@@ -68,6 +69,18 @@ class ProformaInvoice extends BaseModel {
               ALTER TABLE proforma_invoices 
                 ALTER COLUMN quotation_id TYPE TEXT USING quotation_id::text;
             END IF;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        -- Ensure template column exists for storing PI template key
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'proforma_invoices'
+              AND column_name = 'template'
+          ) THEN
+            ALTER TABLE proforma_invoices ADD COLUMN template VARCHAR(255);
           END IF;
         EXCEPTION WHEN OTHERS THEN NULL; END;
 
@@ -151,9 +164,17 @@ class ProformaInvoice extends BaseModel {
           dispatch_mode, transport_name, vehicle_number, transport_id, lr_no,
           courier_name, consignment_no, by_hand, post_service,
           carrier_name, carrier_number,
+          template,
           created_by
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+          $1, $2, $3, $4,
+          $5, $6, $7,
+          $8, $9, $10, $11,
+          $12, $13, $14, $15, $16,
+          $17, $18, $19, $20,
+          $21, $22,
+          $23,
+          $24
         ) RETURNING *
       `;
       
@@ -167,6 +188,8 @@ class ProformaInvoice extends BaseModel {
       const totalAmount = piData.totalAmount !== undefined && piData.totalAmount !== null 
         ? Number(piData.totalAmount) 
         : quotation.total_amount;
+      
+      const templateToSave = piData.template || quotation.template || null;
       
       const piValues = [
         piNumber,
@@ -191,6 +214,8 @@ class ProformaInvoice extends BaseModel {
         piData.post_service || piData.postService || null,
         piData.carrier_name || piData.carrierName || null,
         piData.carrier_number || piData.carrierNumber || null,
+        // Prefer explicit PI template; fall back to quotation template if needed
+        templateToSave,
         piData.createdBy
       ];
       
@@ -228,6 +253,7 @@ class ProformaInvoice extends BaseModel {
       post_service: updateData.post_service || updateData.postService,
       carrier_name: updateData.carrier_name || updateData.carrierName,
       carrier_number: updateData.carrier_number || updateData.carrierNumber,
+      template: updateData.template,
       status: updateData.status,
       pi_date: updateData.pi_date || updateData.piDate,
       valid_until: updateData.valid_until || updateData.validUntil

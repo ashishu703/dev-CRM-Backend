@@ -17,7 +17,7 @@ class WorkOrder extends BaseModel {
   async create(workOrderData) {
     const {
       workOrderNumber,
-      bnaNumber,
+      quotationId: quotationIdValue,
       date,
       deliveryDate,
       contact,
@@ -50,7 +50,7 @@ class WorkOrder extends BaseModel {
 
     const values = [
       workOrderNumber,
-      bnaNumber,
+      quotationIdValue || quotationId || null, // Store quotation ID in bna_number field (legacy support)
       date,
       deliveryDate,
       contact,

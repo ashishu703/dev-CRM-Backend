@@ -52,6 +52,8 @@ class ProformaInvoiceController {
         validUntil: req.body.validUntil,
         status: req.body.status || 'draft',
         createdBy: req.user.email,
+        // Template key - REQUIRED for PI rendering
+        template: req.body.template,
         // Adjusted amounts for remaining amount PIs (if provided)
         subtotal: req.body.subtotal,
         taxAmount: req.body.taxAmount || req.body.tax_amount,

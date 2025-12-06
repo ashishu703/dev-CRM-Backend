@@ -8,13 +8,22 @@ class ConfigurationController {
    */
   async getAll(req, res) {
     try {
-      const [emailConfig, whatsappConfig, cloudinaryConfig, indiamartConfig, tradeindiaConfig, templates] = await Promise.all([
+      const [
+        emailConfig,
+        whatsappConfig,
+        cloudinaryConfig,
+        indiamartConfig,
+        tradeindiaConfig,
+        emailTemplates,
+        documentTemplates
+      ] = await Promise.all([
         Configuration.getEmailConfiguration(),
         Configuration.getWhatsAppConfiguration(),
         Configuration.getCloudinaryConfiguration(),
         Configuration.getIndiamartConfiguration(),
         Configuration.getTradeIndiaConfiguration(),
-        Configuration.getEmailTemplates()
+        Configuration.getEmailTemplates(),
+        Configuration.getDocumentTemplates()
       ]);
 
       res.json({
@@ -25,7 +34,8 @@ class ConfigurationController {
           cloudinary: cloudinaryConfig,
           indiamart: indiamartConfig,
           tradeindia: tradeindiaConfig,
-          templates
+          templates: emailTemplates,
+          documentTemplates
         }
       });
     } catch (error) {
@@ -276,6 +286,153 @@ class ConfigurationController {
       res.status(500).json({
         success: false,
         message: 'Failed to delete email template',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get document templates (for quotations / PI / work orders)
+   */
+  async getDocumentTemplates(req, res) {
+    try {
+      const { type } = req.query;
+      const templates = await Configuration.getDocumentTemplates(type || null);
+
+      res.json({
+        success: true,
+        data: templates
+      });
+    } catch (error) {
+      logger.error('Error fetching document templates:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch document templates',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Create document template
+   */
+  async createDocumentTemplate(req, res) {
+    try {
+      const {
+        templateType,
+        name,
+        templateKey,
+        description,
+        htmlContent,
+        isDefault,
+        isActive
+      } = req.body;
+
+      if (!templateType || !name || !templateKey) {
+        return res.status(400).json({
+          success: false,
+          message: 'templateType, name and templateKey are required'
+        });
+      }
+
+      const template = await Configuration.createDocumentTemplate({
+        templateType,
+        name,
+        templateKey,
+        description,
+        htmlContent,
+        isDefault,
+        isActive
+      });
+
+      res.json({
+        success: true,
+        message: 'Document template created successfully',
+        data: template
+      });
+    } catch (error) {
+      logger.error('Error creating document template:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to create document template',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Update document template
+   */
+  async updateDocumentTemplate(req, res) {
+    try {
+      const { id } = req.params;
+      const {
+        templateType,
+        name,
+        templateKey,
+        description,
+        htmlContent,
+        isDefault,
+        isActive
+      } = req.body;
+
+      const template = await Configuration.updateDocumentTemplate(id, {
+        templateType,
+        name,
+        templateKey,
+        description,
+        htmlContent,
+        isDefault,
+        isActive
+      });
+
+      if (!template) {
+        return res.status(404).json({
+          success: false,
+          message: 'Template not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Document template updated successfully',
+        data: template
+      });
+    } catch (error) {
+      logger.error('Error updating document template:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to update document template',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Delete document template (soft delete)
+   */
+  async deleteDocumentTemplate(req, res) {
+    try {
+      const { id } = req.params;
+
+      const template = await Configuration.deleteDocumentTemplate(id);
+
+      if (!template) {
+        return res.status(404).json({
+          success: false,
+          message: 'Template not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Document template deleted successfully'
+      });
+    } catch (error) {
+      logger.error('Error deleting document template:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to delete document template',
         error: error.message
       });
     }

@@ -21,14 +21,17 @@ class Quotation extends BaseModel {
           customer_name, customer_business, customer_phone, customer_email, 
           customer_address, customer_gst_no, customer_state,
           quotation_date, valid_until, branch,
-          subtotal, tax_rate, tax_amount, discount_rate, discount_amount, total_amount
+          subtotal, tax_rate, tax_amount, discount_rate, discount_amount, total_amount,
+          template, payment_mode, transport_tc, dispatch_through, delivery_terms, material_type,
+          bank_details, terms_sections, bill_to
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+          $22, $23, $24, $25, $26, $27, $28, $29, $30
         ) RETURNING *
       `;
       
-      console.log('Creating quotation with data:', quotationData);
-      console.log('Items to save:', items);
+      console.log('💾 Creating quotation with data:', quotationData);
+      console.log('📦 Items to save:', items);
       
       const quotationValues = [
         quotationNumber,
@@ -51,8 +54,20 @@ class Quotation extends BaseModel {
         quotationData.taxAmount,
         quotationData.discountRate || 0,
         quotationData.discountAmount || 0,
-        quotationData.totalAmount
+        quotationData.totalAmount,
+        // New fields
+        quotationData.template || null,
+        quotationData.paymentMode || null,
+        quotationData.transportTc || null,
+        quotationData.dispatchThrough || null,
+        quotationData.deliveryTerms || null,
+        quotationData.materialType || null,
+        quotationData.bankDetails ? JSON.stringify(quotationData.bankDetails) : null,
+        quotationData.termsSections ? JSON.stringify(quotationData.termsSections) : null,
+        quotationData.billTo ? JSON.stringify(quotationData.billTo) : null
       ];
+      
+      console.log('📤 Quotation values:', quotationValues);
       
       const quotationResult = await query(quotationQuery, quotationValues);
       const quotation = quotationResult.rows[0];
