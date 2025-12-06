@@ -34,3 +34,4 @@ FOR EACH ROW EXECUTE FUNCTION update_product_images_updated_at();
 
 
 
+

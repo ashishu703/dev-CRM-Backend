@@ -24,6 +24,7 @@ const ticketRoutes = require('./routes/tickets');
 const securityLogRoutes = require('./routes/securityLogs');
 const stockRoutes = require('./routes/stock');
 const workOrderRoutes = require('./routes/workOrders');
+const organizationRoutes = require('./routes/organizations');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -123,6 +124,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/work-orders', workOrderRoutes);
+app.use('/api/organizations', organizationRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler

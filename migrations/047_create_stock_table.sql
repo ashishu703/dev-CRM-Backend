@@ -59,3 +59,4 @@ INSERT INTO stock (product_name, quantity, unit, status) VALUES
     ('Telecom Switch Board Cables', 0, 'meters', 'out_of_stock')
 ON CONFLICT (product_name) DO NOTHING;
 
+

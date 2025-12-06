@@ -9,13 +9,17 @@ BEGIN
     UPDATE department_heads 
     SET department_type = 'office_sales'
     WHERE department_type IS NULL 
-       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr');
+       -- Keep this in sync with the latest allowed department types so that
+       -- rerunning this migration does NOT overwrite newer values to office_sales
+       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales');
     
     -- Update any invalid department_type values in department_users
     UPDATE department_users 
     SET department_type = 'office_sales'
     WHERE department_type IS NULL 
-       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr');
+       -- Keep this in sync with the latest allowed department types so that
+       -- rerunning this migration does NOT overwrite newer values to office_sales
+       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales');
     
     -- Now update department_heads table to include HR department type
     BEGIN
@@ -24,7 +28,7 @@ BEGIN
         
         ALTER TABLE department_heads 
         ADD CONSTRAINT department_heads_department_type_check 
-        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr'));
+        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales'));
     EXCEPTION WHEN others THEN
         RAISE NOTICE 'Error updating department_heads constraint: %', SQLERRM;
     END;
@@ -36,7 +40,7 @@ BEGIN
         
         ALTER TABLE department_users 
         ADD CONSTRAINT department_users_department_type_check 
-        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr'));
+        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales'));
     EXCEPTION WHEN others THEN
         RAISE NOTICE 'Error updating department_users constraint: %', SQLERRM;
     END;

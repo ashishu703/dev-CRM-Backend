@@ -212,6 +212,98 @@ class Configuration {
   }
 
   /**
+   * Get document templates (optionally filtered by template_type)
+   */
+  static async getDocumentTemplates(templateType = null) {
+    const params = [];
+    let text = 'SELECT * FROM document_templates WHERE is_active = true';
+
+    if (templateType) {
+      params.push(templateType);
+      text += ` AND template_type = $${params.length}`;
+    }
+
+    text += ' ORDER BY created_at DESC';
+
+    const result = await query(text, params);
+    return result.rows;
+  }
+
+  /**
+   * Create document template
+   */
+  static async createDocumentTemplate(template) {
+    const result = await query(
+      `INSERT INTO document_templates (
+         template_type,
+         name,
+         template_key,
+         description,
+         html_content,
+         is_default,
+         is_active
+       )
+       VALUES ($1, $2, $3, $4, $5, COALESCE($6, false), COALESCE($7, true))
+       RETURNING *`,
+      [
+        template.templateType,
+        template.name,
+        template.templateKey,
+        template.description || null,
+        template.htmlContent || null,
+        template.isDefault,
+        template.isActive
+      ]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Update document template
+   */
+  static async updateDocumentTemplate(id, template) {
+    const result = await query(
+      `UPDATE document_templates
+       SET template_type = $2,
+           name = $3,
+           template_key = $4,
+           description = $5,
+           html_content = $6,
+           is_default = COALESCE($7, is_default),
+           is_active = COALESCE($8, is_active),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [
+        id,
+        template.templateType,
+        template.name,
+        template.templateKey,
+        template.description || null,
+        template.htmlContent || null,
+        template.isDefault,
+        template.isActive
+      ]
+    );
+    return result.rows[0];
+  }
+
+  /**
+   * Soft delete document template
+   */
+  static async deleteDocumentTemplate(id) {
+    const result = await query(
+      `UPDATE document_templates
+       SET is_active = false,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
+  }
+
+  /**
    * Get Indiamart configuration
    */
   static async getIndiamartConfiguration() {

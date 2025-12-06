@@ -1,12 +1,11 @@
 const Joi = require('joi');
 
-const SUPPORTED_DEPARTMENT_TYPES = ['marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales'];
-
 const createHeadSchema = Joi.object({
   username: Joi.string().min(3).max(255).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(6).required(),
-  departmentType: Joi.string().valid(...SUPPORTED_DEPARTMENT_TYPES).required(),
+  // Department type is now a free-form label coming from frontend/DB
+  departmentType: Joi.string().min(1).max(100).required(),
   companyName: Joi.string().min(1).max(255).required(),
   target: Joi.number().min(0).optional(),
   monthlyTarget: Joi.alternatives().try(
@@ -32,7 +31,7 @@ const updateHeadSchema = Joi.object({
   username: Joi.string().min(3).max(255).optional(),
   email: Joi.string().email().optional(),
   password: Joi.string().min(6).optional(),
-  departmentType: Joi.string().valid(...SUPPORTED_DEPARTMENT_TYPES).optional(),
+  departmentType: Joi.string().min(1).max(100).optional(),
   companyName: Joi.string().min(1).max(255).optional(),
   target: Joi.number().min(0).optional(),
   monthlyTarget: Joi.alternatives().try(

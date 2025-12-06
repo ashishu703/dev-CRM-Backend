@@ -8,13 +8,15 @@ BEGIN
     UPDATE department_heads 
     SET department_type = 'office_sales'
     WHERE department_type IS NULL 
-       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr', 'production');
+       -- Keep this in sync with latest allowed department types so reruns don't
+       -- smash newer values (accounts/it/production/telesales) back to office_sales
+       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales');
     
     -- Update any invalid department_type values in department_users
     UPDATE department_users 
     SET department_type = 'office_sales'
     WHERE department_type IS NULL 
-       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr', 'production');
+       OR department_type NOT IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales');
     
     -- Update department_heads constraint
     BEGIN
@@ -23,7 +25,7 @@ BEGIN
         
         ALTER TABLE department_heads 
         ADD CONSTRAINT department_heads_department_type_check 
-        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr', 'production'));
+        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales'));
         
         COMMENT ON CONSTRAINT department_heads_department_type_check ON department_heads IS 'Allows marketing_sales, office_sales, hr and production department types';
     EXCEPTION WHEN others THEN
@@ -37,7 +39,7 @@ BEGIN
         
         ALTER TABLE department_users 
         ADD CONSTRAINT department_users_department_type_check 
-        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr', 'production'));
+        CHECK (department_type IN ('marketing_sales', 'office_sales', 'hr', 'production', 'accounts', 'it', 'telesales'));
         
         COMMENT ON CONSTRAINT department_users_department_type_check ON department_users IS 'Allows marketing_sales, office_sales, hr and production department types';
     EXCEPTION WHEN others THEN
