@@ -19,3 +19,4 @@ WHERE (LOWER(username) LIKE '%rajbhr%' AND LOWER(username) LIKE '%vaishnavi%')
 -- Verify the update (this won't affect the database, just for reference)
 -- SELECT username, email FROM department_users WHERE LOWER(email) LIKE '%vaishnavi%' OR LOWER(username) LIKE '%vaishnavi%';
 
+

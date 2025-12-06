@@ -58,6 +58,8 @@ class ProformaInvoiceController {
         subtotal: req.body.subtotal,
         taxAmount: req.body.taxAmount || req.body.tax_amount,
         totalAmount: req.body.totalAmount || req.body.total_amount,
+        // Template selection
+        template: req.body.template || 'template1',
         // Dispatch details
         dispatchMode: req.body.dispatchMode || req.body.dispatch_mode,
         transportName: req.body.transportName || req.body.transport_name,

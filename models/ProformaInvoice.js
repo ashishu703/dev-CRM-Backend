@@ -128,6 +128,20 @@ class ProformaInvoice extends BaseModel {
         CREATE TRIGGER trg_pi_updated_at
         BEFORE UPDATE ON proforma_invoices
         FOR EACH ROW EXECUTE FUNCTION update_pi_updated_at();
+        
+        -- Add template column if it doesn't exist
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = 'public' AND table_name = 'proforma_invoices' AND column_name = 'template'
+          ) THEN
+            ALTER TABLE proforma_invoices 
+            ADD COLUMN template VARCHAR(50) DEFAULT 'template1';
+            COMMENT ON COLUMN proforma_invoices.template IS 'Template identifier: template1 (Classic), template2 (Modern), or template3 (Minimal)';
+            CREATE INDEX IF NOT EXISTS idx_proforma_invoices_template ON proforma_invoices(template);
+          END IF;
+        EXCEPTION WHEN OTHERS THEN NULL;
+        END;
       EXCEPTION WHEN OTHERS THEN NULL;
       END
       $do$;
@@ -155,12 +169,13 @@ class ProformaInvoice extends BaseModel {
       // Generate PI number
       const piNumber = await this.generatePINumber();
       
-      // Create PI with dispatch details
+      // Create PI with dispatch details and template
       const piQuery = `
         INSERT INTO proforma_invoices (
           pi_number, quotation_id, customer_id, salesperson_id,
           pi_date, valid_until, status,
           subtotal, tax_amount, total_amount, remaining_balance,
+          template,
           dispatch_mode, transport_name, vehicle_number, transport_id, lr_no,
           courier_name, consignment_no, by_hand, post_service,
           carrier_name, carrier_number,
@@ -203,6 +218,7 @@ class ProformaInvoice extends BaseModel {
         taxAmount,
         totalAmount,
         totalAmount, // remaining_balance = total_amount initially
+        piData.template || 'template1', // Template selection
         piData.dispatch_mode || piData.dispatchMode || null,
         piData.transport_name || piData.transportName || null,
         piData.vehicle_number || piData.vehicleNumber || null,
@@ -227,6 +243,9 @@ class ProformaInvoice extends BaseModel {
       
     } catch (error) {
       await client.query('ROLLBACK');
+      console.error('Error creating PI from quotation:', error);
+      console.error('PI Query:', piQuery);
+      console.error('PI Values:', piValues);
       throw error;
     } finally {
       client.release();
