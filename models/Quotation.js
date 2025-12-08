@@ -420,12 +420,10 @@ class Quotation extends BaseModel {
     return await query(queryText, [quotationId]);
   }
 
-  // Get complete quotation data (quotation + items + approval logs + sent logs + PIs + payments)
   async getCompleteData(quotationId) {
     const quotation = await this.getWithItems(quotationId);
     if (!quotation) return null;
     
-    // Get approval logs (rows array)
     const approvalLogsRes = await query(
       'SELECT * FROM quotation_approval_logs WHERE quotation_id = $1 ORDER BY created_at ASC',
       [quotationId]

@@ -10,7 +10,8 @@ const {
   querySchema,
   importCSVSchema,
   idParamSchema,
-  batchUpdateSchema
+  batchUpdateSchema,
+  bulkDeleteSchema
 } = require('../apis/leads/validators');
 const SalespersonLeadController = require('../controllers/salespersonLeadController');
 const upload = require('../middleware/upload');
@@ -20,8 +21,9 @@ router.use(protect);
 router.post('/', mapLeadFields, validateRequest(createLeadSchema), LeadController.create);
 router.get('/', validateRequest(querySchema, 'query'), LeadController.getAll);
 router.get('/stats', LeadController.getStats);
-// Batch update MUST come before parametric :id routes
+// Batch operations MUST come before parametric :id routes
 router.put('/batch', validateRequest(batchUpdateSchema), LeadController.batchUpdate);
+router.delete('/batch', validateRequest(bulkDeleteSchema), LeadController.bulkDelete);
 router.get('/:id', validateRequest(idParamSchema, 'params'), LeadController.getById);
 // IMPORTANT: Do not map fields on update to avoid overwriting existing data with blanks
 router.put('/:id', validateRequest([...idParamSchema, ...updateLeadSchema]), LeadController.update);
@@ -36,7 +38,8 @@ router.get('/assigned/salesperson', SalespersonLeadController.listForLoggedInUse
 router.get('/assigned/salesperson/:username', SalespersonLeadController.listForUsername);
 
 // Salesperson lead create/import so DH also sees them
-router.post('/assigned/salesperson/lead', SalespersonLeadController.createLeadFromSalesperson);
+// Use multer to parse FormData (multipart/form-data)
+router.post('/assigned/salesperson/lead', upload.none(), SalespersonLeadController.createLeadFromSalesperson);
 router.post('/assigned/salesperson/import', validateRequest(importCSVSchema), SalespersonLeadController.importLeadsFromSalesperson);
 
 // Salesperson lead details and updates (including file uploads)
