@@ -1,6 +1,5 @@
 const BaseModel = require('./BaseModel');
 
-// Constants
 const CONSTANTS = {
   CUSTOMER_NAME_MAX_LENGTH: 100,
   PHONE_MAX_LENGTH: 50,
@@ -10,7 +9,6 @@ const CONSTANTS = {
   PARAMS_PER_ROW: 21
 };
 
-// Field mapping for database columns
 const FIELD_MAP = {
   leadSource: 'lead_source',
   productNames: 'product_names',
@@ -53,12 +51,6 @@ class DataValidator {
     return this.truncateString(customer, CONSTANTS.CUSTOMER_NAME_MAX_LENGTH) || null;
   }
 
-  /**
-   * Normalizes GST number - always returns 'N/A' for null/empty values
-   * This ensures NOT NULL constraint is satisfied
-   * @param {*} gstNo - GST number value to normalize
-   * @returns {string} - Normalized GST number or 'N/A'
-   */
   static normalizeGstNo(gstNo) {
     // Handle all null/empty cases
     if (gstNo === undefined || gstNo === null) {
@@ -66,13 +58,9 @@ class DataValidator {
     }
     
     const trimmed = String(gstNo).trim();
-    
-    // Handle empty string or 'N/A' (case insensitive)
     if (trimmed === '' || trimmed.toLowerCase() === 'n/a' || trimmed === 'null') {
       return 'N/A';
     }
-    
-    // Truncate if too long (GST number is VARCHAR(50) in database)
     return trimmed.length > 50 ? trimmed.substring(0, 50) : trimmed;
   }
 
@@ -90,7 +78,6 @@ class DataValidator {
   }
 }
 
-// Query Builder Utility Class
 class QueryBuilder {
   constructor() {
     this.conditions = [];
@@ -188,50 +175,22 @@ class DepartmentHeadLead extends BaseModel {
     return `CUST-${Date.now()}-${index}-${Math.floor(Math.random() * 10000)}`;
   }
 
-  /**
-   * Helper to convert empty/null values to 'N/A' for database storage
-   * Preserves actual data, only converts empty values
-   * @param {*} value - Value to normalize
-   * @returns {string|null} - 'N/A' if empty, actual value if present, null if explicitly null
-   */
   static normalizeForDB(value) {
     if (value === null || value === undefined) return 'N/A';
     const trimmed = String(value).trim();
     return trimmed === '' || trimmed.toLowerCase() === 'n/a' ? 'N/A' : trimmed;
   }
 
-  /**
-   * Normalizes payment status - ensures it matches DB constraint values
-   * Constraint allows: 'PENDING', 'IN_PROGRESS', 'COMPLETED'
-   * @param {*} value - Payment status value
-   * @returns {string} - Valid payment status (defaults to 'PENDING')
-   */
   static normalizePaymentStatus(value) {
     if (value === null || value === undefined) return 'PENDING';
     const trimmed = String(value).trim().toUpperCase();
-    // Check if it's a valid constraint value
-    if (['PENDING', 'IN_PROGRESS', 'COMPLETED'].includes(trimmed)) {
-      return trimmed;
-    }
-    // Default to 'PENDING' for invalid/empty values
-    return 'PENDING';
+    return ['PENDING', 'IN_PROGRESS', 'COMPLETED'].includes(trimmed) ? trimmed : 'PENDING';
   }
 
-  /**
-   * Normalizes telecaller status - ensures it matches DB constraint values
-   * Constraint allows: 'ACTIVE', 'INACTIVE'
-   * @param {*} value - Telecaller status value
-   * @returns {string} - Valid telecaller status (defaults to 'INACTIVE')
-   */
   static normalizeTelecallerStatus(value) {
     if (value === null || value === undefined) return 'INACTIVE';
     const trimmed = String(value).trim().toUpperCase();
-    // Check if it's a valid constraint value
-    if (['ACTIVE', 'INACTIVE'].includes(trimmed)) {
-      return trimmed;
-    }
-    // Default to 'INACTIVE' for invalid/empty values
-    return 'INACTIVE';
+    return ['ACTIVE', 'INACTIVE'].includes(trimmed) ? trimmed : 'INACTIVE';
   }
 
   /**
@@ -242,39 +201,34 @@ class DepartmentHeadLead extends BaseModel {
    * @returns {Array} - Array of values for SQL INSERT
    */
   prepareLeadValues(lead, createdBy) {
-    // Normalize required fields - preserve actual data, default to 'N/A' only if empty
-    // If lead.customer has actual data, preserve it; only use 'N/A' if it's null/empty
     const customer = (lead.customer && DataValidator.normalizeCustomerName(lead.customer)) || 'N/A';
     const phone = DataValidator.cleanPhone(lead.phone) || 'N/A';
     const whatsapp = DataValidator.normalizeWhatsapp(lead.whatsapp, lead.phone) || 'N/A';
     const customerType = (lead.customerType && DataValidator.normalizeCustomerType(lead.customerType)) || 'N/A';
-    
-    // Normalize GST number - CRITICAL: must never be null (NOT NULL constraint)
     const gstNo = DataValidator.normalizeGstNo(lead.gstNo);
 
-    // Prepare values array - convert empty optional fields to 'N/A' to preserve data integrity
     return [
       lead.customerId || null,
-      customer, // Required - defaults to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.email), // Convert empty to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.business), // Convert empty to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.leadSource), // Convert empty to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.productNames || lead.productNamesText), // Convert empty to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.category), // Convert empty to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.salesStatus), // Convert empty to 'N/A'
+      customer,
+      DepartmentHeadLead.normalizeForDB(lead.email),
+      DepartmentHeadLead.normalizeForDB(lead.business),
+      DepartmentHeadLead.normalizeForDB(lead.leadSource),
+      DepartmentHeadLead.normalizeForDB(lead.productNames || lead.productNamesText),
+      DepartmentHeadLead.normalizeForDB(lead.category),
+      DepartmentHeadLead.normalizeForDB(lead.salesStatus),
       lead.createdAt || null,
-      DepartmentHeadLead.normalizeTelecallerStatus(lead.telecallerStatus), // Must be 'ACTIVE' or 'INACTIVE'
-      DepartmentHeadLead.normalizePaymentStatus(lead.paymentStatus), // Must be 'PENDING', 'IN_PROGRESS', or 'COMPLETED'
-      phone, // Required - defaults to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.address), // Convert empty to 'N/A'
-      gstNo, // Required - always 'N/A' if empty (via normalizeGstNo)
-      DepartmentHeadLead.normalizeForDB(lead.state), // Convert empty to 'N/A'
-      customerType, // Required - defaults to 'N/A'
+      DepartmentHeadLead.normalizeTelecallerStatus(lead.telecallerStatus),
+      DepartmentHeadLead.normalizePaymentStatus(lead.paymentStatus),
+      phone,
+      DepartmentHeadLead.normalizeForDB(lead.address),
+      gstNo,
+      DepartmentHeadLead.normalizeForDB(lead.state),
+      customerType,
       lead.date || null,
-      whatsapp, // Required - defaults to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.assignedSalesperson), // Convert empty to 'N/A'
-      DepartmentHeadLead.normalizeForDB(lead.assignedTelecaller), // Convert empty to 'N/A'
-      createdBy || 'system' // Required - defaults to 'system'
+      whatsapp,
+      DepartmentHeadLead.normalizeForDB(lead.assignedSalesperson),
+      DepartmentHeadLead.normalizeForDB(lead.assignedTelecaller),
+      createdBy || 'system'
     ];
   }
 
@@ -348,16 +302,46 @@ class DepartmentHeadLead extends BaseModel {
   }
 
   filterValidRows(rows, existingPhoneSet) {
-    return rows.filter(row => {
-      const name = DataValidator.normalizeCustomerName(row.customer);
-      const phone = DataValidator.cleanPhone(row.phone);
-      
-      const isEmpty = name.length === 0 && (!phone || phone.length === 0);
-      if (isEmpty) return false;
-      
-      const isDuplicate = phone && existingPhoneSet.has(phone);
-      return !isDuplicate;
+    const validRows = [];
+    const skippedRows = [];
+    
+    rows.forEach((row, index) => {
+      try {
+        const name = row.customer ? DataValidator.normalizeCustomerName(row.customer) : null;
+        const phone = row.phone ? DataValidator.cleanPhone(row.phone) : null;
+        
+        const nameIsEmpty = !name || (typeof name === 'string' && name.length === 0);
+        const phoneIsEmpty = !phone || (typeof phone === 'string' && phone.length === 0);
+        
+        if (nameIsEmpty && phoneIsEmpty) {
+          skippedRows.push({
+            rowIndex: index + 1,
+            row,
+            reason: 'Both customer name and phone number are missing'
+          });
+          return;
+        }
+        
+        if (phone && existingPhoneSet.has(phone)) {
+          skippedRows.push({
+            rowIndex: index + 1,
+            row,
+            reason: `Duplicate phone number: ${phone}`
+          });
+          return;
+        }
+        
+        validRows.push(row);
+      } catch (error) {
+        skippedRows.push({
+          rowIndex: index + 1,
+          row,
+          reason: `Error processing row: ${error.message}`
+        });
+      }
     });
+    
+    return { validRows, skippedRows };
   }
 
   buildInsertQuery(placeholders) {
@@ -441,28 +425,52 @@ class DepartmentHeadLead extends BaseModel {
     const existingCustomerIdSet = await this.getExistingCustomerIds(customerIds);
     
     const rowsWithUniqueIds = this.assignUniqueCustomerIds(rows, existingCustomerIdSet);
-    const filteredRows = this.filterValidRows(rowsWithUniqueIds, existingPhoneSet);
+    const { validRows: filteredRows, skippedRows } = this.filterValidRows(rowsWithUniqueIds, existingPhoneSet);
+    const skippedRowsInfo = skippedRows.map(s => ({
+      row: s.rowIndex,
+      reason: s.reason
+    }));
     
     if (filteredRows.length === 0) {
       const duplicatesCount = rows.length;
-      return { rowCount: 0, rows: [], duplicatesCount };
+      return { 
+        rowCount: 0, 
+        rows: [], 
+        duplicatesCount,
+        skippedRows: skippedRowsInfo
+      };
     }
 
     const batches = BatchProcessor.splitIntoBatches(filteredRows, CONSTANTS.BATCH_SIZE);
     let totalRowCount = 0;
     const allInsertedRows = [];
+    const batchSkippedRows = [];
     
-    for (const batch of batches) {
-      const result = await this.insertBatch(batch, createdBy);
-      totalRowCount += result.rowCount;
-      allInsertedRows.push(...result.rows);
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      try {
+        const result = await this.insertBatch(batch, createdBy);
+        totalRowCount += result.rowCount;
+        allInsertedRows.push(...result.rows);
+      } catch (error) {
+        const startRow = batchIndex * CONSTANTS.BATCH_SIZE;
+        batch.forEach((row, idx) => {
+          batchSkippedRows.push({
+            row: startRow + idx + 1,
+            reason: `Database error: ${error.message}`
+          });
+        });
+      }
     }
-
-    const duplicatesCount = rows.length - filteredRows.length;
+    
+    const allSkippedRows = [...skippedRowsInfo, ...batchSkippedRows];
+    
+    const duplicatesCount = rows.length - filteredRows.length - allSkippedRows.length;
     return { 
       rowCount: totalRowCount, 
       rows: allInsertedRows, 
-      duplicatesCount 
+      duplicatesCount,
+      skippedRows: allSkippedRows
     };
   }
 

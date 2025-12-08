@@ -23,10 +23,12 @@ const createLeadSchema = [
     .withMessage('Please provide a valid Indian phone number'),
   
   body('email')
-    .optional()
+    .optional({ nullable: true, checkFalsy: true })
     .custom((value) => {
-      if (value === null || value === undefined || value === '') return true;
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+      if (value === null || value === undefined || value === '' || value === 'N/A' || String(value).trim().toLowerCase() === 'n/a') {
+        return true;
+      }
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value));
     })
     .withMessage('Please provide a valid email address'),
   
@@ -125,10 +127,16 @@ const updateLeadSchema = [
     .withMessage('Please provide a valid Indian phone number'),
   
   body('email')
-    .optional()
+    .optional({ nullable: true, checkFalsy: true })
     .custom((value) => {
-      if (value === null || value === undefined || value === '') return true;
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+      if (value === null || value === undefined || value === '' || value === 'N/A' || (typeof value === 'string' && value.trim().toLowerCase() === 'n/a')) {
+        return true;
+      }
+      const emailStr = String(value).trim();
+      if (emailStr === '' || emailStr.toLowerCase() === 'n/a') {
+        return true; // Treat as no email
+      }
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr);
     })
     .withMessage('Please provide a valid email address'),
   
