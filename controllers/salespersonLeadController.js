@@ -81,28 +81,65 @@ class SalespersonLeadController {
       } catch (_) {}
       const username = req.user?.username;
       const ui = req.body || {};
+      
+      console.log('Received form data:', {
+        name: ui.name,
+        phone: ui.phone,
+        email: ui.email,
+        business: ui.business,
+        address: ui.address,
+        state: ui.state,
+        product_type: ui.product_type,
+        lead_source: ui.lead_source,
+        customer_type: ui.customer_type
+      });
 
-      // Build UI payload for DH model
-      const customerType = ui.customer_type || ui.customerType || null;
+      /**
+       * Normalizes field values - preserves actual data, converts empty to 'N/A' for DB
+       * Applies DRY principle for data normalization
+       * @param {*} value - Field value to normalize
+       * @param {boolean} isRequired - Whether field is required (defaults to 'N/A' if empty)
+       * @returns {string|null} - Normalized value (actual data preserved, empty becomes 'N/A' for required fields)
+       */
+      const normalizeField = (value, isRequired = false) => {
+        // Handle null/undefined - return 'N/A' for required fields, null for optional
+        if (value === undefined || value === null) {
+          return isRequired ? 'N/A' : null;
+        }
+        
+        const trimmed = String(value).trim();
+        
+        // If empty string or already 'N/A' - convert to 'N/A' for required, null for optional
+        if (trimmed === '' || trimmed.toLowerCase() === 'n/a' || trimmed === 'null') {
+          return isRequired ? 'N/A' : null;
+        }
+        
+        // PRESERVE ACTUAL DATA - return as-is if it has content
+        return trimmed;
+      };
+
+      // Extract and normalize values - preserve actual data, convert empty to null (model will convert to 'N/A')
+      // Required fields (NOT NULL in DB): phone, gst_no, customer (for DB constraint)
+      // Logic: If field has data → save actual data, If field is empty → model will save 'N/A' to DB
+      const customerType = normalizeField(ui.customer_type || ui.customerType);
       const dhUi = {
-        customerId: ui.customerId || null,
-        customer: ui.name || ui.customer || null,
-        email: ui.email || null,
-        business: ui.business || null,
-        leadSource: ui.lead_source || ui.leadSource || null,
-        productNames: ui.product_type || ui.productNames || null,
-        // Map customer_type to category if category is not provided
-        category: ui.category || customerType || null,
-        salesStatus: ui.sales_status || null,
-        phone: ui.phone || null,
-        address: ui.address || null,
-        gstNo: ui.gst_no || ui.gstNo || null,
-        state: ui.state || null,
-        customerType: customerType,
-        date: ui.date || null,
-        whatsapp: ui.whatsapp || null,
-        assignedSalesperson: username || ui.assignedSalesperson || null,
-        assignedTelecaller: ui.assignedTelecaller || null,
+        customerId: normalizeField(ui.customerId),
+        customer: normalizeField(ui.name || ui.customer) || 'N/A', // Defaults to 'N/A' if empty (DB constraint)
+        email: normalizeField(ui.email), // Will be converted to 'N/A' in model if null
+        business: normalizeField(ui.business), // Will be converted to 'N/A' in model if null
+        leadSource: normalizeField(ui.lead_source || ui.leadSource), // Will be converted to 'N/A' in model if null
+        productNames: normalizeField(ui.product_type || ui.productNames), // Will be converted to 'N/A' in model if null
+        category: normalizeField(ui.category || customerType), // Will be converted to 'N/A' in model if null
+        salesStatus: normalizeField(ui.sales_status), // Will be converted to 'N/A' in model if null
+        phone: normalizeField(ui.phone, true), // Required field - NOT NULL
+        address: normalizeField(ui.address), // Will be converted to 'N/A' in model if null
+        gstNo: normalizeField(ui.gst_no || ui.gstNo, true), // Required for DB constraint (NOT NULL)
+        state: normalizeField(ui.state), // Will be converted to 'N/A' in model if null
+        customerType: customerType, // Will be converted to 'N/A' in model if null
+        date: normalizeField(ui.date),
+        whatsapp: normalizeField(ui.whatsapp),
+        assignedSalesperson: normalizeField(username || ui.assignedSalesperson), // Will be converted to 'N/A' in model if null
+        assignedTelecaller: normalizeField(ui.assignedTelecaller), // Will be converted to 'N/A' in model if null
       };
 
       const created = await DepartmentHeadLead.createFromUi(dhUi, createdBy);

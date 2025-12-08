@@ -268,6 +268,48 @@ class LeadController {
     }
   }
 
+  // Bulk delete leads (scoped to creator)
+  async bulkDelete(req, res) {
+    try {
+      const { ids } = req.body;
+      
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Lead IDs array is required'
+        });
+      }
+
+      // STRICT CHECK: Verify ownership before deleting
+      const result = await DepartmentHeadLead.deleteManyForCreator(
+        ids,
+        req.user.email,
+        req.user.departmentType,
+        req.user.companyName
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'No leads found or you do not have permission to delete these leads'
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: `Successfully deleted ${result.rowCount} lead(s)`,
+        deletedCount: result.rowCount
+      });
+    } catch (error) {
+      console.error('Error bulk deleting leads:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to delete leads',
+        error: error.message
+      });
+    }
+  }
+
   // Import leads from CSV
   async importCSV(req, res) {
     try {

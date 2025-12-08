@@ -261,6 +261,17 @@ const idParamSchema = [
 ];
 
 // Validation rules for batch update
+// Validation schema for bulk delete
+const bulkDeleteSchema = [
+  body('ids')
+    .isArray({ min: 1 })
+    .withMessage('ids must be a non-empty array')
+    .custom((ids) => {
+      return ids.every(id => Number.isInteger(id) && id > 0);
+    })
+    .withMessage('All IDs must be positive integers')
+];
+
 const batchUpdateSchema = [
   body('ids')
     .isArray({ min: 1 })
@@ -280,5 +291,6 @@ module.exports = {
   importCSVSchema,
   idParamSchema,
   batchUpdateSchema,
+  bulkDeleteSchema,
   salespersonLeadUpdateSchema: []
 };
