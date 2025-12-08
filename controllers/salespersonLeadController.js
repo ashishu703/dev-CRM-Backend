@@ -206,13 +206,26 @@ class SalespersonLeadController {
       });
 
       const result = await DepartmentHeadLead.bulkCreateFromUi(rows, createdBy);
-      // Sync each created id
+      // Sync each created id - skip errors and continue
       if (result?.rows?.length) {
         for (const r of result.rows) {
-          if (r.id) await leadAssignmentService.syncSalespersonLead(r.id);
+          if (r.id) {
+            try {
+              await leadAssignmentService.syncSalespersonLead(r.id);
+            } catch (syncError) {
+              console.error(`Error syncing lead ${r.id} to salesperson_leads:`, syncError.message);
+              // Continue with next lead
+            }
+          }
         }
       }
-      return res.json({ success: true, created: result?.rowCount || result?.rows?.length || 0, duplicatesCount: result?.duplicatesCount || 0 });
+      return res.json({ 
+        success: true, 
+        created: result?.rowCount || result?.rows?.length || 0, 
+        duplicatesCount: result?.duplicatesCount || 0,
+        skippedCount: result?.skippedRows?.length || 0,
+        skippedRows: result?.skippedRows || []
+      });
     } catch (error) {
       console.error('Error importing salesperson leads:', error);
       return res.status(500).json({ success: false, message: 'Failed to import leads', error: error.message });

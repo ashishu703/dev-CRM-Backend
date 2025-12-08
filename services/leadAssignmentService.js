@@ -1,5 +1,6 @@
 const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const SalespersonLead = require('../models/SalespersonLead');
+const DataValidator = DepartmentHeadLead.DataValidator;
 const logger = require('../utils/logger');
 
 
@@ -126,15 +127,20 @@ class LeadAssignmentService {
       state: preserveData(dhLead.state),
       lead_source: preserveData(dhLead.lead_source),
       customer_type: preserveData(dhLead.customer_type),
-      date: dhLead.date || null,
+      date: DataValidator.normalizeDate(dhLead.date),
       sales_status: preserveData(dhLead.sales_status),
       whatsapp: whatsapp,
       created_by: dhLead.created_by || 'system',
     };
 
     logger.info(`syncSalespersonLead: Upserting lead ${dhLead.id} with phone: ${phone}, name: ${safeName}`);
-    await SalespersonLead.upsertById(upsertPayload);
-    logger.info(`syncSalespersonLead: Successfully synced lead ${dhLead.id} to salesperson_leads`);
+    try {
+      await SalespersonLead.upsertById(upsertPayload);
+      logger.info(`syncSalespersonLead: Successfully synced lead ${dhLead.id} to salesperson_leads`);
+    } catch (error) {
+      logger.error(`syncSalespersonLead: Error syncing lead ${dhLead.id} to salesperson_leads: ${error.message}`);
+      // Skip this lead and continue - don't throw to allow other leads to sync
+    }
   }
 }
 

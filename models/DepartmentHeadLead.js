@@ -71,6 +71,37 @@ class DataValidator {
     return trimmed.length > 50 ? trimmed.substring(0, 50) : trimmed;
   }
 
+  static normalizeDate(dateValue) {
+    if (!dateValue) return null;
+    
+    const dateStr = String(dateValue).trim();
+    if (!dateStr || dateStr === 'null' || dateStr === 'N/A') return null;
+    
+    if (dateStr.includes('-') || dateStr.includes('/')) {
+      const separator = dateStr.includes('-') ? '-' : '/';
+      const parts = dateStr.split(separator);
+      if (parts.length === 3) {
+        const [part1, part2, part3] = parts.map(p => p.trim());
+        if (part1.length === 2 && part3.length === 4) {
+          return `${part3}-${part2.padStart(2, '0')}-${part1.padStart(2, '0')}`;
+        }
+        if (part1.length === 4) {
+          return `${part1}-${part2.padStart(2, '0')}-${part3.padStart(2, '0')}`;
+        }
+      }
+    }
+    
+    try {
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+    } catch (e) {
+    }
+    
+    return null;
+  }
+
   static validateRow(row) {
     const name = this.normalizeCustomerName(row.customer);
     const phone = this.cleanPhone(row.phone);
@@ -206,6 +237,7 @@ class DepartmentHeadLead extends BaseModel {
     const whatsapp = DataValidator.normalizeWhatsapp(lead.whatsapp, lead.phone) || 'N/A';
     const customerType = (lead.customerType && DataValidator.normalizeCustomerType(lead.customerType)) || 'N/A';
     const gstNo = DataValidator.normalizeGstNo(lead.gstNo);
+    const normalizedDate = DataValidator.normalizeDate(lead.date);
 
     return [
       lead.customerId || null,
@@ -224,7 +256,7 @@ class DepartmentHeadLead extends BaseModel {
       gstNo,
       DepartmentHeadLead.normalizeForDB(lead.state),
       customerType,
-      lead.date || null,
+      normalizedDate,
       whatsapp,
       DepartmentHeadLead.normalizeForDB(lead.assignedSalesperson),
       DepartmentHeadLead.normalizeForDB(lead.assignedTelecaller),
@@ -329,6 +361,19 @@ class DepartmentHeadLead extends BaseModel {
             reason: `Duplicate phone number: ${phone}`
           });
           return;
+        }
+        
+        // Validate date format - skip row if date is invalid
+        if (row.date) {
+          const normalizedDate = DataValidator.normalizeDate(row.date);
+          if (!normalizedDate) {
+            skippedRows.push({
+              rowIndex: index + 1,
+              row,
+              reason: `Invalid date format: ${row.date} (expected DD-MM-YYYY, DD/MM/YYYY, or YYYY-MM-DD)`
+            });
+            return;
+          }
         }
         
         validRows.push(row);
@@ -465,11 +510,11 @@ class DepartmentHeadLead extends BaseModel {
     
     const allSkippedRows = [...skippedRowsInfo, ...batchSkippedRows];
     
-    const duplicatesCount = rows.length - filteredRows.length - allSkippedRows.length;
+    const duplicateSkippedCount = skippedRowsInfo.filter(s => s.reason && s.reason.includes('Duplicate')).length;
     return { 
       rowCount: totalRowCount, 
       rows: allInsertedRows, 
-      duplicatesCount,
+      duplicatesCount: duplicateSkippedCount,
       skippedRows: allSkippedRows
     };
   }
@@ -783,4 +828,6 @@ class DepartmentHeadLead extends BaseModel {
   }
 }
 
-module.exports = new DepartmentHeadLead();
+const instance = new DepartmentHeadLead();
+instance.DataValidator = DataValidator;
+module.exports = instance;
