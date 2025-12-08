@@ -348,10 +348,24 @@ class LeadController {
 
       const importedCount = result?.rowCount ?? 0;
       const duplicatesCount = result?.duplicatesCount ?? 0;
+      const skippedRows = result?.skippedRows || [];
+      let message = `Successfully imported ${importedCount} lead(s)`;
+      if (duplicatesCount > 0) {
+        message += `, ${duplicatesCount} duplicate(s) skipped`;
+      }
+      if (skippedRows.length > 0) {
+        message += `, ${skippedRows.length} row(s) skipped due to validation errors`;
+      }
+      
       res.status(201).json({
         success: true,
-        message: `Successfully imported ${importedCount} leads${duplicatesCount ? `, ${duplicatesCount} duplicate(s) skipped` : ''}`,
-        data: { importedCount, duplicatesCount }
+        message,
+        data: { 
+          importedCount, 
+          duplicatesCount,
+          skippedCount: skippedRows.length,
+          skippedRows: skippedRows.slice(0, 50)
+        }
       });
     } catch (error) {
       console.error('Error importing CSV:', error);
