@@ -115,6 +115,39 @@ class SalespersonLead extends BaseModel {
     return result.rows && result.rows[0] ? result.rows[0] : null;
   }
 
+  async getByIdForUser(id, username, departmentType = null, companyName = null) {
+    const conditions = [];
+    const values = [id, username];
+    let paramCount = 3;
+    
+    // Check if lead is assigned to the user
+    conditions.push(`COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($2))`);
+    
+    if (departmentType) {
+      conditions.push(`dh.department_type = $${paramCount}`);
+      values.push(departmentType);
+      paramCount++;
+    }
+    
+    if (companyName) {
+      conditions.push(`dh.company_name = $${paramCount}`);
+      values.push(companyName);
+      paramCount++;
+    }
+    
+    const query = `
+      SELECT sl.*
+      FROM salesperson_leads sl
+      JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE sl.id = $1 AND ${conditions.join(' AND ')}
+      LIMIT 1
+    `;
+    
+    const result = await SalespersonLead.query(query, values);
+    return result.rows && result.rows[0] ? result.rows[0] : null;
+  }
+
   async updateById(id, update) {
     const fields = [];
     const values = [];
