@@ -48,8 +48,23 @@ class SalespersonLeadController {
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const row = await SalespersonLead.getById(id);
-      if (!row) return res.status(404).json({ success: false, message: 'Lead not found' });
+      const username = req.user?.username;
+      if (!username) {
+        return res.status(400).json({ success: false, message: 'Username not available in token' });
+      }
+      
+      // STRICT CHECK: Verify the lead is assigned to the logged-in user
+      const departmentType = req.user?.departmentType || null;
+      const companyName = req.user?.companyName || null;
+      const row = await SalespersonLead.getByIdForUser(id, username, departmentType, companyName);
+      
+      if (!row) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'Lead not found or you do not have access to this lead' 
+        });
+      }
+      
       return res.json({ success: true, data: row });
     } catch (error) {
       console.error('Error fetching salesperson lead by id:', error);
