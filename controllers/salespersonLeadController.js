@@ -129,7 +129,8 @@ class SalespersonLeadController {
         business: normalizeField(ui.business), // Will be converted to 'N/A' in model if null
         leadSource: normalizeField(ui.lead_source || ui.leadSource), // Will be converted to 'N/A' in model if null
         productNames: normalizeField(ui.product_type || ui.productNames), // Will be converted to 'N/A' in model if null
-        category: normalizeField(ui.category || customerType), // Will be converted to 'N/A' in model if null
+        // Only use category if explicitly provided - no auto-assignment from customerType
+        category: normalizeField(ui.category), // Will be converted to 'N/A' in model if null
         salesStatus: normalizeField(ui.sales_status), // Will be converted to 'N/A' in model if null
         phone: normalizeField(ui.phone, true), // Required field - NOT NULL
         address: normalizeField(ui.address), // Will be converted to 'N/A' in model if null
@@ -180,7 +181,7 @@ class SalespersonLeadController {
         return name.length > 0 || phone.length > 0;
       });
 
-      // Normalize to DH UI rows
+      // Normalize to DH UI rows - only import data from CSV headers, no auto-assignment
       const rows = leads.map((l) => {
         const customerType = l.customer_type || l.customerType || null;
         return {
@@ -190,8 +191,8 @@ class SalespersonLeadController {
           business: l.business || null,
           leadSource: l.lead_source || l.leadSource || null,
           productNames: l.product_type || l.productNames || null,
-          // Map customer_type to category if category is not provided
-          category: l.category || customerType || null,
+          // Only use category if explicitly provided in CSV - no auto-assignment from customerType
+          category: l.category || null,
           salesStatus: l.sales_status || null,
           phone: l.phone || null,
           address: l.address || null,

@@ -25,6 +25,7 @@ const securityLogRoutes = require('./routes/securityLogs');
 const stockRoutes = require('./routes/stock');
 const workOrderRoutes = require('./routes/workOrders');
 const organizationRoutes = require('./routes/organizations');
+const tradeIndiaRoutes = require('./routes/tradeIndia');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -125,6 +126,7 @@ app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/work-orders', workOrderRoutes);
 app.use('/api/organizations', organizationRoutes);
+app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler
@@ -137,6 +139,12 @@ app.use('*', (req, res) => {
 
 // Error handling middleware
 app.use(errorHandler);
+
+// Initialize TradeIndia cron service (if enabled)
+if (process.env.TRADEINDIA_CRON_ENABLED === 'true') {
+  const tradeIndiaCronService = require('./services/tradeIndiaCronService');
+  logger.info('TradeIndia cron service initialized');
+}
 
 // Start server
 app.listen(PORT, () => {
