@@ -770,14 +770,16 @@ class PaymentController {
   }
 
   // Get payments for multiple customers (bulk)
+  // OPTIMIZED: Supports both GET (query) and POST (body) to handle large arrays
   async getBulkByCustomers(req, res) {
     try {
-      const { customerIds } = req.query;
+      // Support both GET (query) and POST (body) for backward compatibility and large arrays
+      const customerIds = req.body?.customerIds || req.query?.customerIds;
       
       if (!customerIds) {
         return res.status(400).json({
           success: false,
-          message: 'customerIds query parameter is required'
+          message: 'customerIds is required (query parameter for GET or body for POST)'
         });
       }
 

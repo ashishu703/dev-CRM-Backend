@@ -10,6 +10,7 @@ router.use(protect);
 router.get('/all', proformaInvoiceController.getAll);
 router.get('/pending', proformaInvoiceController.getPendingApproval);
 router.get('/bulk-by-quotations', proformaInvoiceController.getBulkByQuotations);
+router.post('/bulk-by-quotations', proformaInvoiceController.getBulkByQuotations); // POST for large arrays
 router.post('/quotation/:quotationId', proformaInvoiceController.createFromQuotation);
 router.get('/:id', proformaInvoiceController.getById);
 router.get('/:id/payments', proformaInvoiceController.getWithPayments);
