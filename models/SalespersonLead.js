@@ -110,6 +110,155 @@ class SalespersonLead extends BaseModel {
     return result.rows || [];
   }
 
+  /**
+   * Get paginated leads with document status info (quotations and PIs counts)
+   * OPTIMIZED: Uses bulk queries instead of N+1 pattern
+   */
+  async listForUserWithDocStatus(username, departmentType = null, companyName = null, page = 1, limit = 20) {
+    const conditions = [];
+    const values = [username];
+    let paramCount = 2;
+    
+    conditions.push(`COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($1))`);
+    
+    if (departmentType) {
+      conditions.push(`dh.department_type = $${paramCount}`);
+      values.push(departmentType);
+      paramCount++;
+    }
+    
+    if (companyName) {
+      conditions.push(`dh.company_name = $${paramCount}`);
+      values.push(companyName);
+      paramCount++;
+    }
+    
+    // Get total count first
+    const countQuery = `
+      SELECT COUNT(*) as total
+      FROM salesperson_leads sl
+      JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE ${conditions.join(' AND ')}
+    `;
+    const countResult = await SalespersonLead.query(countQuery, values);
+    const total = parseInt(countResult.rows[0]?.total || 0);
+    
+    // Get paginated leads
+    const offset = (page - 1) * limit;
+    const query = `
+      SELECT sl.*
+      FROM salesperson_leads sl
+      JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY sl.id ASC
+      LIMIT $${paramCount} OFFSET $${paramCount + 1}
+    `;
+    values.push(limit, offset);
+    
+    const result = await SalespersonLead.query(query, values);
+    const leads = result.rows || [];
+    
+    if (leads.length === 0) {
+      return {
+        leads: [],
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      };
+    }
+    
+    // Get lead IDs for bulk queries
+    const leadIds = leads.map(l => l.id);
+    
+    // OPTIMIZED: Bulk fetch quotations for all leads in one query
+    const quotationPlaceholders = leadIds.map((_, idx) => `$${idx + 1}`).join(',');
+    const quotationsQuery = `
+      SELECT 
+        q.customer_id as lead_id,
+        q.id,
+        q.status,
+        q.created_at,
+        ROW_NUMBER() OVER (PARTITION BY q.customer_id ORDER BY q.created_at DESC) as rn
+      FROM quotations q
+      WHERE q.customer_id IN (${quotationPlaceholders})
+    `;
+    const quotationsResult = await SalespersonLead.query(quotationsQuery, leadIds);
+    const allQuotations = quotationsResult.rows || [];
+    
+    // Get latest quotation per lead and extract quotation IDs
+    const latestQuotationsByLead = {};
+    const quotationIds = [];
+    allQuotations.forEach(q => {
+      if (q.rn === 1) {
+        latestQuotationsByLead[q.lead_id] = q;
+        if (q.id) quotationIds.push(q.id);
+      }
+    });
+    
+    // OPTIMIZED: Bulk fetch PIs for all quotations in one query
+    let pisByQuotationId = {};
+    let allPIs = [];
+    if (quotationIds.length > 0) {
+      const piPlaceholders = quotationIds.map((_, idx) => `$${idx + 1}`).join(',');
+      const pisQuery = `
+        SELECT 
+          pi.quotation_id,
+          pi.id,
+          pi.status,
+          pi.created_at,
+          ROW_NUMBER() OVER (PARTITION BY pi.quotation_id ORDER BY pi.created_at DESC) as rn
+        FROM proforma_invoices pi
+        WHERE pi.quotation_id IN (${piPlaceholders})
+      `;
+      const pisResult = await SalespersonLead.query(pisQuery, quotationIds);
+      allPIs = pisResult.rows || [];
+      
+      allPIs.forEach(pi => {
+        if (pi.rn === 1) {
+          pisByQuotationId[pi.quotation_id] = pi;
+        }
+      });
+    }
+    
+    // Enrich leads with document status info
+    const enrichedLeads = leads.map(lead => {
+      const latestQuotation = latestQuotationsByLead[lead.id];
+      const latestPI = latestQuotation ? pisByQuotationId[latestQuotation.id] : null;
+      
+      // Count quotations and PIs for this lead
+      const quotationCount = allQuotations.filter(q => q.lead_id === lead.id).length;
+      const piCount = latestQuotation 
+        ? allPIs.filter(pi => {
+            // Find all PIs for quotations of this lead
+            const leadQuotations = allQuotations.filter(q => q.lead_id === lead.id);
+            return leadQuotations.some(q => pi.quotation_id === q.id);
+          }).length
+        : 0;
+      
+      return {
+        ...lead,
+        // Document status info
+        quotation_count: quotationCount,
+        latest_quotation_status: latestQuotation ? (latestQuotation.status || '').toLowerCase() : null,
+        latest_quotation_id: latestQuotation?.id || null,
+        pi_count: piCount,
+        latest_pi_status: latestPI ? (latestPI.status || '').toLowerCase() : null,
+        latest_pi_id: latestPI?.id || null
+      };
+    });
+    
+    return {
+      leads: enrichedLeads,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
+  }
+
   async getById(id) {
     const result = await SalespersonLead.query('SELECT * FROM salesperson_leads WHERE id = $1', [id]);
     return result.rows && result.rows[0] ? result.rows[0] : null;

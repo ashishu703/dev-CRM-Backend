@@ -20,8 +20,30 @@ class SalespersonLeadController {
       // STRICT CHECK: Filter by department and company to prevent cross-department access
       const departmentType = req.user?.departmentType || null;
       const companyName = req.user?.companyName || null;
-      const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
-      return res.json({ success: true, data: rows });
+      
+      // OPTIMIZED: Support pagination and document status
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const includeDocStatus = req.query.includeDocStatus === 'true' || req.query.includeDocStatus === true;
+      
+      if (includeDocStatus) {
+        // Use optimized method with document status
+        const result = await SalespersonLead.listForUserWithDocStatus(username, departmentType, companyName, page, limit);
+        return res.json({ 
+          success: true, 
+          data: result.leads,
+          pagination: {
+            page: result.page,
+            limit: result.limit,
+            total: result.total,
+            totalPages: result.totalPages
+          }
+        });
+      } else {
+        // Backward compatibility: return all leads without pagination
+        const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
+        return res.json({ success: true, data: rows });
+      }
     } catch (error) {
       console.error('Error fetching salesperson leads (self):', error);
       return res.status(500).json({ success: false, message: 'Failed to fetch leads', error: error.message });
@@ -137,6 +159,33 @@ class SalespersonLeadController {
       // Required fields (NOT NULL in DB): phone, gst_no, customer (for DB constraint)
       // Logic: If field has data → save actual data, If field is empty → model will save 'N/A' to DB
       const customerType = normalizeField(ui.customer_type || ui.customerType);
+      const phone = normalizeField(ui.phone, true); // Required field - NOT NULL
+      
+      // Check for duplicate lead by phone number
+      const cleanedPhone = phone.replace(/\D/g, '').slice(-10);
+      const { query } = require('../config/database');
+      const duplicateCheck = await query(
+        `SELECT id, customer, business, assigned_salesperson 
+         FROM department_head_leads 
+         WHERE created_by = $1 AND phone = $2 
+         LIMIT 1`,
+        [createdBy, cleanedPhone]
+      );
+      
+      if (duplicateCheck.rows && duplicateCheck.rows.length > 0) {
+        const duplicate = duplicateCheck.rows[0];
+        return res.status(409).json({ 
+          success: false, 
+          message: 'Duplicate lead found',
+          isDuplicate: true,
+          duplicateLead: {
+            id: duplicate.id,
+            business: duplicate.business || 'N/A',
+            assignedSalesperson: duplicate.assigned_salesperson || null
+          }
+        });
+      }
+
       const dhUi = {
         customerId: normalizeField(ui.customerId),
         customer: normalizeField(ui.name || ui.customer) || 'N/A', // Defaults to 'N/A' if empty (DB constraint)
@@ -147,7 +196,7 @@ class SalespersonLeadController {
         // Only use category if explicitly provided - no auto-assignment from customerType
         category: normalizeField(ui.category), // Will be converted to 'N/A' in model if null
         salesStatus: normalizeField(ui.sales_status), // Will be converted to 'N/A' in model if null
-        phone: normalizeField(ui.phone, true), // Required field - NOT NULL
+        phone: phone, // Required field - NOT NULL
         address: normalizeField(ui.address), // Will be converted to 'N/A' in model if null
         gstNo: normalizeField(ui.gst_no || ui.gstNo, true), // Required for DB constraint (NOT NULL)
         state: normalizeField(ui.state), // Will be converted to 'N/A' in model if null

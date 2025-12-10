@@ -10,7 +10,9 @@ router.use(protect);
 router.get('/approved', quotationController.getApprovedForCustomer);
 router.get('/bulk-with-payments', quotationController.getBulkWithPayments);
 router.get('/bulk-by-customers', quotationController.getBulkByCustomers);
+router.post('/bulk-by-customers', quotationController.getBulkByCustomers); // POST for large arrays
 router.get('/bulk-summaries', quotationController.getBulkSummaries);
+router.post('/bulk-summaries', quotationController.getBulkSummaries); // POST for large arrays
 router.get('/pending-verification', quotationController.getPendingVerification);
 router.get('/status/:status', quotationController.getByStatus);
 router.get('/customer/:customerId', quotationController.getByCustomer);

@@ -528,14 +528,16 @@ class QuotationController {
   }
 
   // Get quotations for multiple customers (bulk)
+  // OPTIMIZED: Supports both GET (query) and POST (body) to handle large arrays
   async getBulkByCustomers(req, res) {
     try {
-      const { customerIds } = req.query;
+      // Support both GET (query) and POST (body) for backward compatibility and large arrays
+      const customerIds = req.body?.customerIds || req.query?.customerIds;
       
       if (!customerIds) {
         return res.status(400).json({
           success: false,
-          message: 'customerIds query parameter is required'
+          message: 'customerIds is required (query parameter for GET or body for POST)'
         });
       }
 
@@ -595,14 +597,16 @@ class QuotationController {
   }
 
   // Get summaries for multiple quotations (bulk)
+  // OPTIMIZED: Supports both GET (query) and POST (body) to handle large arrays
   async getBulkSummaries(req, res) {
     try {
-      const { quotationIds } = req.query;
+      // Support both GET (query) and POST (body) for backward compatibility and large arrays
+      const quotationIds = req.body?.quotationIds || req.query?.quotationIds;
       
       if (!quotationIds) {
         return res.status(400).json({
           success: false,
-          message: 'quotationIds query parameter is required'
+          message: 'quotationIds is required (query parameter for GET or body for POST)'
         });
       }
 

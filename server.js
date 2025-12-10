@@ -3,6 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const compression = require('./middleware/compression');
+const { cacheMiddleware } = require('./middleware/cache');
 require('dotenv').config();
 
 const logger = require('./utils/logger');
@@ -75,9 +77,17 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+// OPTIMIZED: Response compression (reduces payload size by 70-90%)
+app.use(compression);
+
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// OPTIMIZED: Cache middleware for GET requests (reduces DB load)
+app.use('/api/leads', cacheMiddleware(300)); // 5 minute cache
+app.use('/api/quotations', cacheMiddleware(180)); // 3 minute cache
+app.use('/api/proforma-invoices', cacheMiddleware(180)); // 3 minute cache
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));

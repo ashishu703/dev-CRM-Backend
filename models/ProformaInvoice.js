@@ -154,6 +154,10 @@ class ProformaInvoice extends BaseModel {
     await this.ensureSchema();
     const client = await getClient();
     
+    // Declare variables outside try block for error logging
+    let piQuery = null;
+    let piValues = null;
+    
     try {
       await client.query('BEGIN');
       
@@ -170,7 +174,8 @@ class ProformaInvoice extends BaseModel {
       const piNumber = await this.generatePINumber();
       
       // Create PI with dispatch details and template
-      const piQuery = `
+      // FIXED: Column count matches VALUES count (24 columns = 24 placeholders)
+      piQuery = `
         INSERT INTO proforma_invoices (
           pi_number, quotation_id, customer_id, salesperson_id,
           pi_date, valid_until, status,
@@ -179,7 +184,6 @@ class ProformaInvoice extends BaseModel {
           dispatch_mode, transport_name, vehicle_number, transport_id, lr_no,
           courier_name, consignment_no, by_hand, post_service,
           carrier_name, carrier_number,
-          template,
           created_by
         ) VALUES (
           $1, $2, $3, $4,
@@ -187,9 +191,7 @@ class ProformaInvoice extends BaseModel {
           $8, $9, $10, $11,
           $12, $13, $14, $15, $16,
           $17, $18, $19, $20,
-          $21, $22,
-          $23,
-          $24
+          $21, $22, $23, $24
         ) RETURNING *
       `;
       
@@ -206,33 +208,32 @@ class ProformaInvoice extends BaseModel {
       
       const templateToSave = piData.template || quotation.template || null;
       
-      const piValues = [
-        piNumber,
-        quotationId,
-        quotation.customer_id,
-        quotation.salesperson_id,
-        piData.piDate || new Date().toISOString().split('T')[0],
-        piData.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        piData.status || 'draft',
-        subtotal,
-        taxAmount,
-        totalAmount,
-        totalAmount, // remaining_balance = total_amount initially
-        piData.template || 'template1', // Template selection
-        piData.dispatch_mode || piData.dispatchMode || null,
-        piData.transport_name || piData.transportName || null,
-        piData.vehicle_number || piData.vehicleNumber || null,
-        piData.transport_id || piData.transportId || null,
-        piData.lr_no || piData.lrNo || null,
-        piData.courier_name || piData.courierName || null,
-        piData.consignment_no || piData.consignmentNo || null,
-        piData.by_hand || piData.byHand || null,
-        piData.post_service || piData.postService || null,
-        piData.carrier_name || piData.carrierName || null,
-        piData.carrier_number || piData.carrierNumber || null,
-        // Prefer explicit PI template; fall back to quotation template if needed
-        templateToSave,
-        piData.createdBy
+      // FIXED: 24 values matching 24 columns, removed duplicate template
+      piValues = [
+        piNumber,                                                    // $1 - pi_number
+        quotationId,                                                 // $2 - quotation_id
+        quotation.customer_id,                                      // $3 - customer_id
+        quotation.salesperson_id,                                   // $4 - salesperson_id
+        piData.piDate || new Date().toISOString().split('T')[0],    // $5 - pi_date
+        piData.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // $6 - valid_until
+        piData.status || 'draft',                                   // $7 - status
+        subtotal,                                                    // $8 - subtotal
+        taxAmount,                                                   // $9 - tax_amount
+        totalAmount,                                                 // $10 - total_amount
+        totalAmount,                                                 // $11 - remaining_balance
+        templateToSave || 'template1',                              // $12 - template (using templateToSave, not duplicate)
+        piData.dispatch_mode || piData.dispatchMode || null,        // $13 - dispatch_mode
+        piData.transport_name || piData.transportName || null,      // $14 - transport_name
+        piData.vehicle_number || piData.vehicleNumber || null,      // $15 - vehicle_number
+        piData.transport_id || piData.transportId || null,          // $16 - transport_id
+        piData.lr_no || piData.lrNo || null,                        // $17 - lr_no
+        piData.courier_name || piData.courierName || null,          // $18 - courier_name
+        piData.consignment_no || piData.consignmentNo || null,      // $19 - consignment_no
+        piData.by_hand || piData.byHand || null,                    // $20 - by_hand
+        piData.post_service || piData.postService || null,          // $21 - post_service
+        piData.carrier_name || piData.carrierName || null,          // $22 - carrier_name
+        piData.carrier_number || piData.carrierNumber || null,      // $23 - carrier_number
+        piData.createdBy                                             // $24 - created_by
       ];
       
       const piResult = await client.query(piQuery, piValues);
@@ -244,8 +245,12 @@ class ProformaInvoice extends BaseModel {
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error creating PI from quotation:', error);
-      console.error('PI Query:', piQuery);
-      console.error('PI Values:', piValues);
+      if (piQuery) {
+        console.error('PI Query:', piQuery);
+      }
+      if (piValues) {
+        console.error('PI Values:', piValues);
+      }
       throw error;
     } finally {
       client.release();
