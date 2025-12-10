@@ -14,12 +14,16 @@ class SalespersonLeadController {
   async listForLoggedInUser(req, res) {
     try {
       const username = req.user?.username;
-      if (!username) {
-        return res.status(400).json({ success: false, message: 'Username not available in token' });
+      const userEmail = req.user?.email;
+      if (!username && !userEmail) {
+        return res.status(400).json({ success: false, message: 'Username or email not available in token' });
       }
       // STRICT CHECK: Filter by department and company to prevent cross-department access
       const departmentType = req.user?.departmentType || null;
       const companyName = req.user?.companyName || null;
+      
+      // DEBUG: Log username and email for troubleshooting
+      console.log(`[SalespersonLeadController] Fetching leads for username: ${username}, email: ${userEmail}, departmentType: ${departmentType}, companyName: ${companyName}`);
       
       // OPTIMIZED: Support pagination and document status
       const page = parseInt(req.query.page) || 1;
@@ -28,7 +32,8 @@ class SalespersonLeadController {
       
       if (includeDocStatus) {
         // Use optimized method with document status
-        const result = await SalespersonLead.listForUserWithDocStatus(username, departmentType, companyName, page, limit);
+        const result = await SalespersonLead.listForUserWithDocStatus(username, departmentType, companyName, page, limit, userEmail);
+        console.log(`[SalespersonLeadController] Found ${result.total} total leads for username: ${username}, email: ${userEmail}`);
         return res.json({ 
           success: true, 
           data: result.leads,
@@ -41,7 +46,8 @@ class SalespersonLeadController {
         });
       } else {
         // Backward compatibility: return all leads without pagination
-        const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
+        const rows = await SalespersonLead.listForUser(username, departmentType, companyName, userEmail);
+        console.log(`[SalespersonLeadController] Found ${rows.length} leads for username: ${username}, email: ${userEmail}`);
         return res.json({ success: true, data: rows });
       }
     } catch (error) {
@@ -59,7 +65,8 @@ class SalespersonLeadController {
       // STRICT CHECK: Filter by department and company to prevent cross-department access
       const departmentType = req.user?.departmentType || null;
       const companyName = req.user?.companyName || null;
-      const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
+      const userEmail = req.user?.email || null;
+      const rows = await SalespersonLead.listForUser(username, departmentType, companyName, userEmail);
       return res.json({ success: true, data: rows });
     } catch (error) {
       console.error('Error fetching salesperson leads (by username):', error);
@@ -78,7 +85,8 @@ class SalespersonLeadController {
       // STRICT CHECK: Verify the lead is assigned to the logged-in user
       const departmentType = req.user?.departmentType || null;
       const companyName = req.user?.companyName || null;
-      const row = await SalespersonLead.getByIdForUser(id, username, departmentType, companyName);
+      const userEmail = req.user?.email || null;
+      const row = await SalespersonLead.getByIdForUser(id, username, departmentType, companyName, userEmail);
       
       if (!row) {
         return res.status(404).json({ 

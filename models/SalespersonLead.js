@@ -78,23 +78,129 @@ class SalespersonLead extends BaseModel {
     return await SalespersonLead.query(query, values);
   }
 
-  async listForUser(username, departmentType = null, companyName = null) {
+  /**
+   * Build matching conditions for assigned_salesperson field
+   * Matches against username (primary) and email (fallback)
+   * @private
+   */
+  _buildAssignmentMatchConditions(username, userEmail, paramStart) {
     const conditions = [];
-    const values = [username];
-    let paramCount = 2;
+    const values = [];
+    let paramCount = paramStart;
     
-    conditions.push(`COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($1))`);
+    const usernameLower = username ? username.toLowerCase().trim() : '';
+    const emailLower = userEmail ? userEmail.toLowerCase().trim() : '';
+    const emailLocal = emailLower.includes('@') ? emailLower.split('@')[0] : emailLower;
     
+    if (usernameLower) {
+      conditions.push(`TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) = $${paramCount}`);
+      values.push(usernameLower);
+      paramCount++;
+    }
+    
+    if (emailLower && emailLower !== usernameLower) {
+      conditions.push(`TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) = $${paramCount}`);
+      values.push(emailLower);
+      paramCount++;
+    }
+    
+    if (emailLocal && emailLocal !== emailLower && emailLocal !== usernameLower) {
+      conditions.push(`TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) = $${paramCount}`);
+      values.push(emailLocal);
+      paramCount++;
+    }
+    
+    return { conditions, values, nextParam: paramCount };
+  }
+
+  async listForUser(username, departmentType = null, companyName = null, userEmail = null) {
+    if (!username && !userEmail) {
+      console.warn('[SalespersonLead.listForUser] No username or email provided, returning empty');
+      return [];
+    }
+    
+    // DEBUG: Check what values are actually stored in assigned_salesperson (for troubleshooting)
+    const debugValues = [];
+    let debugParamCount = 1;
+    const debugConditions = ["COALESCE(dhl.assigned_salesperson, '') != ''"];
+    
+    // STRICT: Always filter by department and company for security
+    if (departmentType) {
+      debugConditions.push(`dh.department_type = $${debugParamCount}`);
+      debugValues.push(departmentType);
+      debugParamCount++;
+    } else {
+      console.warn('[SalespersonLead.listForUser] WARNING: No departmentType provided - security risk!');
+    }
+    
+    if (companyName) {
+      debugConditions.push(`dh.company_name = $${debugParamCount}`);
+      debugValues.push(companyName);
+      debugParamCount++;
+    } else {
+      console.warn('[SalespersonLead.listForUser] WARNING: No companyName provided - security risk!');
+    }
+    
+    const debugQuery = `
+      SELECT DISTINCT 
+        TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) as assigned_value,
+        COUNT(*) as lead_count
+      FROM department_head_leads dhl
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE ${debugConditions.join(' AND ')}
+      GROUP BY TRIM(LOWER(COALESCE(dhl.assigned_salesperson, '')))
+      ORDER BY lead_count DESC
+      LIMIT 10
+    `;
+    try {
+      const debugResult = await SalespersonLead.query(debugQuery, debugValues);
+      console.log('[SalespersonLead.listForUser] Sample assigned_salesperson values in DB:', JSON.stringify(debugResult.rows, null, 2));
+    } catch (err) {
+      console.error('[SalespersonLead.listForUser] Error checking DB values:', err.message);
+    }
+    
+    const conditions = [];
+    const values = [];
+    let paramCount = 1;
+    
+    const matchResult = this._buildAssignmentMatchConditions(username, userEmail, paramCount);
+    if (matchResult.conditions.length === 0) {
+      console.warn('[SalespersonLead.listForUser] No valid matching conditions, returning empty');
+      return [];
+    }
+    
+    // Log what we're trying to match
+    console.log(`[SalespersonLead.listForUser] Trying to match against:`, {
+      username: username ? username.toLowerCase().trim() : null,
+      email: userEmail ? userEmail.toLowerCase().trim() : null,
+      emailLocal: userEmail ? userEmail.toLowerCase().trim().split('@')[0] : null,
+      matchValues: matchResult.values
+    });
+    
+    // Assignment matching: must match user AND not be empty
+    conditions.push(`(${matchResult.conditions.join(' OR ')})`);
+    conditions.push(`COALESCE(dhl.assigned_salesperson, '') != ''`);
+    values.push(...matchResult.values);
+    paramCount = matchResult.nextParam;
+    
+    // STRICT: Department filtering is mandatory for security
     if (departmentType) {
       conditions.push(`dh.department_type = $${paramCount}`);
       values.push(departmentType);
       paramCount++;
+    } else {
+      console.error('[SalespersonLead.listForUser] SECURITY ERROR: departmentType is required but not provided!');
+      return [];
     }
     
+    // STRICT: Company filtering is mandatory for security
     if (companyName) {
       conditions.push(`dh.company_name = $${paramCount}`);
       values.push(companyName);
       paramCount++;
+    } else {
+      console.error('[SalespersonLead.listForUser] SECURITY ERROR: companyName is required but not provided!');
+      return [];
     }
     
     const query = `
@@ -106,7 +212,34 @@ class SalespersonLead extends BaseModel {
       ORDER BY sl.id ASC
     `;
     
+    // Debug logging
+    console.log(`[SalespersonLead.listForUser] Query for username: ${username}, email: ${userEmail}, dept: ${departmentType}, company: ${companyName}`);
+    console.log(`[SalespersonLead.listForUser] Query: ${query.replace(/\$\d+/g, '?')}`);
+    console.log(`[SalespersonLead.listForUser] Values:`, values);
+    
     const result = await SalespersonLead.query(query, values);
+    const rowCount = result.rows?.length || 0;
+    console.log(`[SalespersonLead.listForUser] Found ${rowCount} leads for user`);
+    
+    // DEBUG: Check a sample of what was actually matched (only in development, not dummy data)
+    if (process.env.NODE_ENV === 'development' && rowCount > 0 && result.rows.length > 0) {
+      const sampleLeadIds = result.rows.slice(0, 3).map(r => r.id);
+      const sampleQuery = `
+        SELECT 
+          dhl.id,
+          dhl.assigned_salesperson,
+          TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) as assigned_normalized
+        FROM department_head_leads dhl
+        WHERE dhl.id = ANY($1)
+      `;
+      try {
+        const sampleResult = await SalespersonLead.query(sampleQuery, [sampleLeadIds]);
+        console.log('[SalespersonLead.listForUser] DEBUG: Sample matched leads (first 3) - these are REAL leads, not dummy:', sampleResult.rows);
+      } catch (err) {
+        console.error('[SalespersonLead.listForUser] Error checking sample leads:', err.message);
+      }
+    }
+    
     return result.rows || [];
   }
 
@@ -114,26 +247,74 @@ class SalespersonLead extends BaseModel {
    * Get paginated leads with document status info (quotations and PIs counts)
    * OPTIMIZED: Uses bulk queries instead of N+1 pattern
    */
-  async listForUserWithDocStatus(username, departmentType = null, companyName = null, page = 1, limit = 20) {
+  async listForUserWithDocStatus(username, departmentType = null, companyName = null, page = 1, limit = 20, userEmail = null) {
+    if (!username && !userEmail) {
+      console.warn('[SalespersonLead.listForUserWithDocStatus] No username or email provided, returning empty');
+      return {
+        leads: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0
+      };
+    }
+    
     const conditions = [];
-    const values = [username];
-    let paramCount = 2;
+    const values = [];
+    let paramCount = 1;
     
-    conditions.push(`COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($1))`);
+    // Build assignment matching conditions (DRY principle - reuse helper method)
+    const matchResult = this._buildAssignmentMatchConditions(username, userEmail, paramCount);
+    if (matchResult.conditions.length === 0) {
+      console.warn('[SalespersonLead.listForUserWithDocStatus] No valid matching conditions, returning empty');
+      return {
+        leads: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0
+      };
+    }
     
+    // Assignment matching: must match user AND not be empty
+    conditions.push(`(${matchResult.conditions.join(' OR ')})`);
+    conditions.push(`COALESCE(dhl.assigned_salesperson, '') != ''`);
+    values.push(...matchResult.values);
+    paramCount = matchResult.nextParam;
+    
+    // STRICT: Department filtering is mandatory for security
     if (departmentType) {
       conditions.push(`dh.department_type = $${paramCount}`);
       values.push(departmentType);
       paramCount++;
+    } else {
+      console.error('[SalespersonLead.listForUserWithDocStatus] SECURITY ERROR: departmentType is required but not provided!');
+      return {
+        leads: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0
+      };
     }
     
+    // STRICT: Company filtering is mandatory for security
     if (companyName) {
       conditions.push(`dh.company_name = $${paramCount}`);
       values.push(companyName);
       paramCount++;
+    } else {
+      console.error('[SalespersonLead.listForUserWithDocStatus] SECURITY ERROR: companyName is required but not provided!');
+      return {
+        leads: [],
+        total: 0,
+        page,
+        limit,
+        totalPages: 0
+      };
     }
     
-    // Get total count first
+    // Get total count first (using same conditions)
     const countQuery = `
       SELECT COUNT(*) as total
       FROM salesperson_leads sl
@@ -143,6 +324,10 @@ class SalespersonLead extends BaseModel {
     `;
     const countResult = await SalespersonLead.query(countQuery, values);
     const total = parseInt(countResult.rows[0]?.total || 0);
+    
+    // Debug logging
+    console.log(`[SalespersonLead.listForUserWithDocStatus] Query for username: ${username}, email: ${userEmail}, dept: ${departmentType}, company: ${companyName}`);
+    console.log(`[SalespersonLead.listForUserWithDocStatus] Total count: ${total}`);
     
     // Get paginated leads
     const offset = (page - 1) * limit;
@@ -155,10 +340,12 @@ class SalespersonLead extends BaseModel {
       ORDER BY sl.id ASC
       LIMIT $${paramCount} OFFSET $${paramCount + 1}
     `;
-    values.push(limit, offset);
+    const queryValues = [...values, limit, offset];
     
-    const result = await SalespersonLead.query(query, values);
+    const result = await SalespersonLead.query(query, queryValues);
     const leads = result.rows || [];
+    
+    console.log(`[SalespersonLead.listForUserWithDocStatus] Found ${leads.length} leads for page ${page}`);
     
     if (leads.length === 0) {
       return {
@@ -264,24 +451,47 @@ class SalespersonLead extends BaseModel {
     return result.rows && result.rows[0] ? result.rows[0] : null;
   }
 
-  async getByIdForUser(id, username, departmentType = null, companyName = null) {
-    const conditions = [];
-    const values = [id, username];
-    let paramCount = 3;
+  async getByIdForUser(id, username, departmentType = null, companyName = null, userEmail = null) {
+    if (!username && !userEmail) {
+      console.warn('[SalespersonLead.getByIdForUser] No username or email provided');
+      return null;
+    }
     
-    // Check if lead is assigned to the user
-    conditions.push(`COALESCE(TRIM(LOWER(dhl.assigned_salesperson)), '') = TRIM(LOWER($2))`);
+    const conditions = [`sl.id = $1`];
+    const values = [id];
+    let paramCount = 2;
     
+    // Build assignment matching conditions (DRY principle - reuse helper method)
+    const matchResult = this._buildAssignmentMatchConditions(username, userEmail, paramCount);
+    if (matchResult.conditions.length === 0) {
+      console.warn('[SalespersonLead.getByIdForUser] No valid matching conditions');
+      return null;
+    }
+    
+    // Assignment matching: must match user AND not be empty
+    conditions.push(`(${matchResult.conditions.join(' OR ')})`);
+    conditions.push(`COALESCE(dhl.assigned_salesperson, '') != ''`);
+    values.push(...matchResult.values);
+    paramCount = matchResult.nextParam;
+    
+    // STRICT: Department filtering is mandatory for security
     if (departmentType) {
       conditions.push(`dh.department_type = $${paramCount}`);
       values.push(departmentType);
       paramCount++;
+    } else {
+      console.error('[SalespersonLead.getByIdForUser] SECURITY ERROR: departmentType is required but not provided!');
+      return null;
     }
     
+    // STRICT: Company filtering is mandatory for security
     if (companyName) {
       conditions.push(`dh.company_name = $${paramCount}`);
       values.push(companyName);
       paramCount++;
+    } else {
+      console.error('[SalespersonLead.getByIdForUser] SECURITY ERROR: companyName is required but not provided!');
+      return null;
     }
     
     const query = `
@@ -289,7 +499,7 @@ class SalespersonLead extends BaseModel {
       FROM salesperson_leads sl
       JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
-      WHERE sl.id = $1 AND ${conditions.join(' AND ')}
+      WHERE ${conditions.join(' AND ')}
       LIMIT 1
     `;
     
