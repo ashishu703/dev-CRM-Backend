@@ -77,6 +77,21 @@ class SalespersonLeadController {
   async getById(req, res) {
     try {
       const { id } = req.params;
+      const isSuperAdmin = req.user?.role === 'SUPERADMIN' || req.user?.role === 'superadmin';
+      
+      // For SuperAdmin, allow access to any lead without department/company restrictions
+      if (isSuperAdmin) {
+        const row = await SalespersonLead.getById(id);
+        if (!row) {
+          return res.status(404).json({ 
+            success: false, 
+            message: 'Lead not found' 
+          });
+        }
+        return res.json({ success: true, data: row });
+      }
+      
+      // For non-SuperAdmin users, check assignment and department restrictions
       const username = req.user?.username;
       if (!username) {
         return res.status(400).json({ success: false, message: 'Username not available in token' });

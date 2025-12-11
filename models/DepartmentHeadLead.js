@@ -538,9 +538,15 @@ class DepartmentHeadLead extends BaseModel {
     `;
 
     const builder = new QueryBuilder();
-    builder.addCondition('dhl.created_by', filters.createdBy);
-    builder.addCondition('dh.department_type', filters.departmentType);
-    builder.addCondition('dh.company_name', filters.companyName);
+    if (filters.createdBy) {
+      builder.addCondition('dhl.created_by', filters.createdBy);
+    }
+    if (filters.departmentType) {
+      builder.addCondition('dh.department_type', filters.departmentType);
+    }
+    if (filters.companyName) {
+      builder.addCondition('dh.company_name', filters.companyName);
+    }
     builder.addSearchCondition(['dhl.customer', 'dhl.email', 'dhl.business'], filters.search);
     builder.addCondition('dhl.state', filters.state);
     builder.addCondition('dhl.product_names', filters.productType);
@@ -795,17 +801,20 @@ class DepartmentHeadLead extends BaseModel {
         COUNT(CASE WHEN dhl.payment_status = 'COMPLETED' THEN 1 END) as completed_payments
       FROM department_head_leads dhl
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
-      WHERE dhl.created_by = $1
     `;
 
     const builder = new QueryBuilder();
-    builder.paramCount = 2;
+    builder.paramCount = 1;
+    
+    if (createdBy) {
+      builder.addCondition('dhl.created_by', createdBy);
+    }
     builder.addCondition('dh.department_type', departmentType);
     builder.addCondition('dh.company_name', companyName);
 
-    const additionalConditions = builder.buildWhereClause();
-    const query = additionalConditions ? baseQuery + additionalConditions.replace('WHERE', 'AND') : baseQuery;
-    const values = [createdBy, ...builder.getValues()];
+    const whereClause = builder.buildWhereClause();
+    const query = baseQuery + whereClause;
+    const values = builder.getValues();
 
     return { query, values };
   }

@@ -5,6 +5,55 @@ const TargetCalculationService = require('../services/targetCalculationService')
 const DepartmentCleanupService = require('../services/departmentCleanupService');
 
 class DepartmentUserController extends BaseController {
+  /**
+   * Recalculate and enrich user target data (DRY principle)
+   * @private
+   * @param {Object} userJson - User JSON object
+   * @returns {Promise<Object>} Enriched user object with calculated targets
+   */
+  static async _enrichUserTargetData(userJson) {
+    const targetStartDate = userJson.target_start_date || userJson.targetStartDate;
+    const targetEndDate = userJson.target_end_date || userJson.targetEndDate;
+    const startDateStr = targetStartDate ? new Date(targetStartDate).toISOString().split('T')[0] : null;
+    const endDateStr = targetEndDate ? new Date(targetEndDate).toISOString().split('T')[0] : null;
+    
+    // Recalculate achieved_target and due payment using target date range
+    const [recalculatedAchieved, duePayment] = await Promise.all([
+      TargetCalculationService.calculateAchievedTarget(userJson.id, startDateStr, endDateStr),
+      TargetCalculationService.calculateDuePayment(userJson.id, startDateStr, endDateStr)
+    ]);
+    
+    // Ensure achieved_target is a valid non-negative number (already rounded to 2 decimals in service)
+    const target = parseFloat(userJson.target || 0);
+    const achieved = Number.isFinite(recalculatedAchieved) && recalculatedAchieved >= 0 
+      ? recalculatedAchieved 
+      : 0;
+    
+    // Set achieved_target (always non-negative, rounded to 2 decimals)
+    userJson.achieved_target = Math.round(achieved * 100) / 100;
+    userJson.achievedTarget = userJson.achieved_target;
+    
+    // Calculate remaining target (clamp to 0 if negative, round to 2 decimals)
+    const remaining = target - achieved;
+    userJson.remaining_target = remaining > 0 ? Math.round(remaining * 100) / 100 : 0;
+    
+    // Set due payment (already rounded to 2 decimals in service)
+    userJson.due_payment = duePayment;
+    userJson.duePayment = duePayment;
+    
+    // Optional: track extra achieved if target is exceeded
+    if (remaining < 0) {
+      userJson.extra_achieved = Math.round(Math.abs(remaining) * 100) / 100;
+    }
+    
+    // Ensure camelCase fields are present for frontend compatibility
+    userJson.isActive = userJson.is_active !== undefined ? userJson.is_active : userJson.isActive;
+    userJson.departmentType = userJson.department_type || userJson.departmentType;
+    userJson.lastLogin = userJson.last_login || userJson.lastLogin;
+    
+    return userJson;
+  }
+
   static async create(req, res) {
     await BaseController.handleAsyncOperation(res, async () => {
       const { username, email, password, departmentType, companyName, headUserId, headUserEmail, target } = req.body;
@@ -134,30 +183,17 @@ class DepartmentUserController extends BaseController {
       const usersWithRecalculatedTarget = await Promise.all(
         result.data.map(async (user) => {
           const userJson = user.toJSON();
-          const targetStartDate = userJson.target_start_date || userJson.targetStartDate;
-          const targetEndDate = userJson.target_end_date || userJson.targetEndDate;
+          const enrichedUser = await DepartmentUserController._enrichUserTargetData(userJson);
           
-          // Recalculate achieved_target using target date range
-          const recalculatedAchieved = await TargetCalculationService.calculateAchievedTarget(
-            userJson.id,
-            targetStartDate ? new Date(targetStartDate).toISOString().split('T')[0] : null,
-            targetEndDate ? new Date(targetEndDate).toISOString().split('T')[0] : null
-          );
+          // Debug log (can be removed in production)
+          console.log('TARGET DEBUG', {
+            user: enrichedUser.username,
+            target: parseFloat(enrichedUser.target || 0),
+            achieved: enrichedUser.achieved_target,
+            remaining: enrichedUser.remaining_target,
+          });
           
-          // Update the achieved_target in the user object
-          userJson.achieved_target = recalculatedAchieved;
-          userJson.achievedTarget = recalculatedAchieved;
-          
-          // Update remaining target
-          const target = parseFloat(userJson.target || 0);
-          userJson.remaining_target = target - recalculatedAchieved;
-          
-          // Ensure camelCase fields are present for frontend compatibility
-          userJson.isActive = userJson.is_active !== undefined ? userJson.is_active : userJson.isActive;
-          userJson.departmentType = userJson.department_type || userJson.departmentType;
-          userJson.lastLogin = userJson.last_login || userJson.lastLogin;
-          
-          return userJson;
+          return enrichedUser;
         })
       );
       
@@ -322,25 +358,7 @@ class DepartmentUserController extends BaseController {
       const usersWithRecalculatedTarget = await Promise.all(
         users.map(async (user) => {
           const userJson = user.toJSON();
-          const targetStartDate = userJson.target_start_date || userJson.targetStartDate;
-          const targetEndDate = userJson.target_end_date || userJson.targetEndDate;
-          
-          // Recalculate achieved_target using target date range
-          const recalculatedAchieved = await TargetCalculationService.calculateAchievedTarget(
-            userJson.id,
-            targetStartDate ? new Date(targetStartDate).toISOString().split('T')[0] : null,
-            targetEndDate ? new Date(targetEndDate).toISOString().split('T')[0] : null
-          );
-          
-          // Update the achieved_target in the user object
-          userJson.achieved_target = recalculatedAchieved;
-          userJson.achievedTarget = recalculatedAchieved;
-          
-          // Update remaining target
-          const target = parseFloat(userJson.target || 0);
-          userJson.remaining_target = target - recalculatedAchieved;
-          
-          return userJson;
+          return await DepartmentUserController._enrichUserTargetData(userJson);
         })
       );
       
