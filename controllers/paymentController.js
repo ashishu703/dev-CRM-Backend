@@ -465,12 +465,95 @@ class PaymentController {
           l.email as lead_email,
           l.phone as lead_phone,
           q.quotation_number,
+          q.total_amount as quotation_total_amount,
           pi.pi_number,
-          pi.id as pi_full_id
+          pi.id as pi_full_id,
+          COALESCE(
+            du_assign.username,
+            du_spl.username,
+            du_q.username,
+            dhl.assigned_salesperson,
+            spl.created_by,
+            q.created_by
+          ) as salesperson_name,
+          COALESCE(
+            qi_agg.product_names,
+            ph.product_name,
+            dhl.product_names,
+            'N/A'
+          ) as product_name_from_quotation,
+          -- Company and Department information from department_head_leads creator
+          COALESCE(
+            dh_creator.company_name,
+            du_creator.company_name,
+            'N/A'
+          ) as lead_company_name,
+          COALESCE(
+            dh_creator.department_type,
+            du_creator.department_type,
+            'N/A'
+          ) as lead_department_type,
+          -- Department Head name for this company and department (from department_heads or department_users table)
+          COALESCE(
+            dh_creator.username,
+            dh_creator.email,
+            du_creator.username,
+            du_creator.email,
+            dhl.created_by,
+            'N/A'
+          ) as department_head_name,
+          -- Calculate cumulative approved payments for this quotation
+          COALESCE(approved_payments.total_approved_paid, 0) as quotation_total_paid,
+          -- Calculate remaining due for quotation
+          GREATEST(0, COALESCE(q.total_amount, 0) - COALESCE(approved_payments.total_approved_paid, 0)) as quotation_remaining_due
         FROM payment_history ph
         LEFT JOIN leads l ON ph.lead_id::text = l.id::text
         LEFT JOIN quotations q ON ph.quotation_id::text = q.id::text
         LEFT JOIN proforma_invoices pi ON ph.pi_id::text = pi.id::text
+        -- Join department_head_leads via quotations.customer_id (not ph.lead_id!)
+        -- quotations.customer_id references department_head_leads.id
+        LEFT JOIN department_head_leads dhl ON q.customer_id = dhl.id
+        LEFT JOIN salesperson_leads spl ON q.customer_id = spl.id
+        -- Join with department_heads to get company_name, department_type, and department head name from creator
+        -- Use case-insensitive comparison for email matching, handle NULL values
+        LEFT JOIN department_heads dh_creator ON (
+          dhl.created_by IS NOT NULL
+          AND LOWER(TRIM(COALESCE(dh_creator.email, ''))) = LOWER(TRIM(COALESCE(dhl.created_by, '')))
+          AND dh_creator.is_active = true
+        )
+        -- Fallback: also join with department_users in case creator is a department user
+        LEFT JOIN department_users du_creator ON (
+          dhl.created_by IS NOT NULL
+          AND LOWER(TRIM(COALESCE(du_creator.email, ''))) = LOWER(TRIM(COALESCE(dhl.created_by, '')))
+          AND du_creator.is_active = true
+          AND dh_creator.id IS NULL  -- Only use du_creator if dh_creator didn't match
+        )
+        LEFT JOIN department_users du_assign ON (
+          dhl.assigned_salesperson IS NOT NULL 
+          AND (du_assign.email = dhl.assigned_salesperson OR du_assign.username = dhl.assigned_salesperson)
+        )
+        LEFT JOIN department_users du_spl ON (
+          spl.created_by IS NOT NULL 
+          AND (du_spl.email = spl.created_by OR du_spl.username = spl.created_by)
+        )
+        LEFT JOIN department_users du_q ON (
+          q.created_by IS NOT NULL 
+          AND (du_q.email = q.created_by OR du_q.username = q.created_by)
+        )
+        LEFT JOIN LATERAL (
+          SELECT STRING_AGG(DISTINCT qi.product_name, ', ' ORDER BY qi.product_name) as product_names
+          FROM quotation_items qi
+          WHERE qi.quotation_id = q.id
+        ) qi_agg ON true
+        LEFT JOIN LATERAL (
+          SELECT COALESCE(SUM(ph2.installment_amount), 0) as total_approved_paid
+          FROM payment_history ph2
+          WHERE ph2.quotation_id = q.id
+            AND ph2.installment_amount > 0
+            AND (ph2.payment_status = 'completed' OR ph2.payment_status = 'advance')
+            AND ph2.is_refund = false
+            AND (ph2.approval_status = 'approved' OR (ph2.approval_status IS NULL AND ph2.payment_approved = true))
+        ) approved_payments ON true
         ${whereClause}
         ORDER BY ph.payment_date DESC, ph.created_at DESC
         LIMIT ${limitParam} OFFSET ${offsetParam}

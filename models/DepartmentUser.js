@@ -144,8 +144,7 @@ class DepartmentUser extends BaseModel {
 
     values.push(limit, offset);
     const result = await this.query(
-      `SELECT du.*, dh.username as head_username, dh.email as head_email,
-              (COALESCE(du.target, 0) - COALESCE(du.achieved_target, 0)) AS remaining_target
+      `SELECT du.*, dh.username as head_username, dh.email as head_email
        FROM ${this.TABLE_NAME} du 
        LEFT JOIN department_heads dh ON du.head_user_id = dh.id 
        ${whereClause} ORDER BY du.created_at DESC LIMIT $${paramCount++} OFFSET $${paramCount++}`,
