@@ -66,56 +66,226 @@ class MarketingMeeting extends BaseModel {
     let paramCount = 1;
 
     if (filters.assigned_to) {
-      conditions.push(`assigned_to = $${paramCount++}`);
+      conditions.push(`mm.assigned_to = $${paramCount++}`);
       values.push(filters.assigned_to);
     }
 
     if (filters.assigned_by) {
-      conditions.push(`assigned_by = $${paramCount++}`);
+      conditions.push(`mm.assigned_by = $${paramCount++}`);
       values.push(filters.assigned_by);
     }
 
     if (filters.status) {
-      conditions.push(`status = $${paramCount++}`);
+      conditions.push(`mm.status = $${paramCount++}`);
       values.push(filters.status);
     }
 
     if (filters.meeting_date) {
-      conditions.push(`meeting_date = $${paramCount++}`);
+      conditions.push(`mm.meeting_date = $${paramCount++}`);
       values.push(filters.meeting_date);
     }
 
     if (filters.start_date && filters.end_date) {
-      conditions.push(`meeting_date BETWEEN $${paramCount++} AND $${paramCount++}`);
+      conditions.push(`mm.meeting_date BETWEEN $${paramCount++} AND $${paramCount++}`);
       values.push(filters.start_date, filters.end_date);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sqlQuery = `
-      SELECT * FROM marketing_meetings
+      SELECT 
+        mm.*,
+        dhl.customer as lead_customer,
+        dhl.phone as lead_phone,
+        dhl.email as lead_email,
+        dhl.address as lead_address,
+        CASE 
+          WHEN EXISTS (
+            SELECT 1 FROM marketing_check_ins mci 
+            WHERE mci.meeting_id = mm.id
+          ) THEN true
+          ELSE false
+        END as has_checkin
+      FROM marketing_meetings mm
+      LEFT JOIN department_head_leads dhl ON (
+        (mm.lead_id IS NOT NULL AND dhl.id = mm.lead_id)
+        OR (mm.customer_id IS NOT NULL AND dhl.id = mm.customer_id)
+      )
       ${whereClause}
-      ORDER BY meeting_date DESC, created_at DESC
+      ORDER BY mm.meeting_date DESC, mm.created_at DESC
     `;
 
     const result = await query(sqlQuery, values);
-    return result.rows;
+    
+    // Enrich meeting data with lead details
+    return result.rows.map(meeting => {
+      const isEmpty = (val) => !val || val === null || val === undefined || (typeof val === 'string' && val.trim() === '') || val === 'N/A' || val === 'Address not provided';
+      
+      return {
+        ...meeting,
+        // Use lead data if meeting data is missing or empty
+        customer_name: !isEmpty(meeting.lead_customer) ? meeting.lead_customer : (meeting.customer_name || 'N/A'),
+        customer_phone: !isEmpty(meeting.lead_phone) ? meeting.lead_phone : (meeting.customer_phone || null),
+        customer_email: !isEmpty(meeting.lead_email) ? meeting.lead_email : (meeting.customer_email || null),
+        address: !isEmpty(meeting.lead_address) ? meeting.lead_address : (meeting.address || 'Address not provided'),
+        // Check-in status
+        is_checked_in: meeting.has_checkin || meeting.status === 'Completed'
+      };
+    });
   }
 
   /**
    * Get meetings assigned to a specific salesperson
+   * Only returns meetings that have valid leads (exist in department_head_leads)
    * @param {string} salespersonEmail - Salesperson email/ID
    * @returns {Promise<Array>} Array of assigned meetings
    */
-  async getAssignedTo(salespersonEmail) {
+  async getAssignedTo(salespersonIdentifier) {
+    // Use case-insensitive matching to handle email/username variations
+    // Match by both email and username by checking department_users table
+    // Join with department_head_leads to get additional lead details
+    // Only return meetings where the lead still exists in department_head_leads
     const sqlQuery = `
-      SELECT * FROM marketing_meetings
-      WHERE assigned_to = $1
-      ORDER BY meeting_date ASC, meeting_time ASC
+      SELECT 
+        mm.*,
+        dhl.customer as lead_customer,
+        dhl.phone as lead_phone,
+        dhl.email as lead_email,
+        dhl.business as lead_business,
+        dhl.state as lead_state,
+        dhl.address as lead_address,
+        dhl.gst_no as lead_gst_no,
+        dhl.product_names as lead_product_names,
+        dhl.lead_source as lead_lead_source,
+        CASE 
+          WHEN EXISTS (
+            SELECT 1 FROM marketing_check_ins mci 
+            WHERE mci.meeting_id = mm.id
+          ) THEN true
+          ELSE false
+        END as has_checkin
+      FROM marketing_meetings mm
+      LEFT JOIN department_head_leads dhl ON (
+        (mm.lead_id IS NOT NULL AND dhl.id::text = mm.lead_id::text)
+        OR (mm.customer_id IS NOT NULL AND dhl.id::text = mm.customer_id::text)
+        OR (mm.lead_id IS NOT NULL AND dhl.id = mm.lead_id::integer)
+        OR (mm.customer_id IS NOT NULL AND dhl.id = mm.customer_id::integer)
+      )
+      WHERE (
+        LOWER(mm.assigned_to) = LOWER($1)
+        OR EXISTS (
+          SELECT 1 FROM department_users du
+          WHERE (LOWER(du.email) = LOWER($1) OR LOWER(du.username) = LOWER($1))
+            AND (LOWER(du.email) = LOWER(mm.assigned_to) OR LOWER(du.username) = LOWER(mm.assigned_to))
+        )
+      )
+      ORDER BY mm.meeting_date ASC, mm.meeting_time ASC
     `;
 
-    const result = await query(sqlQuery, [salespersonEmail]);
-    return result.rows;
+    console.log('Fetching meetings for salesperson:', salespersonIdentifier);
+    const result = await query(sqlQuery, [salespersonIdentifier]);
+    console.log('Found meetings:', result.rows.length, 'for identifier:', salespersonIdentifier);
+    
+    // If join didn't work, fetch lead data directly for each meeting
+    for (let i = 0; i < result.rows.length; i++) {
+      const meeting = result.rows[i];
+      // If we don't have lead data from join, fetch it directly
+      if (!meeting.lead_customer && (meeting.lead_id || meeting.customer_id)) {
+        try {
+          const leadId = meeting.lead_id || meeting.customer_id;
+          const leadQuery = 'SELECT customer, address, phone, email, state FROM department_head_leads WHERE id = $1';
+          const leadResult = await query(leadQuery, [leadId]);
+          if (leadResult.rows.length > 0) {
+            const lead = leadResult.rows[0];
+            meeting.lead_customer = lead.customer;
+            meeting.lead_address = lead.address;
+            meeting.lead_phone = lead.phone;
+            meeting.lead_email = lead.email;
+            meeting.lead_state = lead.state;
+            console.log('Fetched lead data directly for meeting:', meeting.id, lead);
+          }
+        } catch (err) {
+          console.error('Error fetching lead data for meeting:', meeting.id, err);
+        }
+      }
+    }
+    
+    // Helper function to check if a value is empty
+    const isEmpty = (val) => !val || val === null || val === undefined || (typeof val === 'string' && val.trim() === '') || val === 'N/A' || val === 'Address not provided';
+    
+    // Enrich meeting data with lead details if available
+    const enrichedMeetings = result.rows.map(meeting => {
+      // Log the raw meeting data for debugging
+      console.log('Raw meeting data:', {
+        id: meeting.id,
+        customer_name: meeting.customer_name,
+        lead_customer: meeting.lead_customer,
+        lead_name: meeting.lead_name,
+        address: meeting.address,
+        lead_address: meeting.lead_address,
+        location: meeting.location,
+        lead_id: meeting.lead_id,
+        customer_id: meeting.customer_id,
+        dhl_joined: !!meeting.lead_customer
+      });
+      
+      // Always prioritize lead data when available (lead is source of truth)
+      // Priority: lead_customer > meeting.customer_name > 'N/A'
+      let customerName = meeting.lead_customer;
+      if (isEmpty(customerName)) {
+        customerName = meeting.customer_name;
+      }
+      if (isEmpty(customerName)) {
+        customerName = 'N/A';
+      }
+      
+      // Priority: lead_address > location > meeting.address > 'Address not provided'
+      let address = meeting.lead_address;
+      if (isEmpty(address)) {
+        address = meeting.location;
+      }
+      if (isEmpty(address)) {
+        address = meeting.address;
+      }
+      if (isEmpty(address)) {
+        address = 'Address not provided';
+      }
+      
+      const phone = !isEmpty(meeting.customer_phone) 
+        ? meeting.customer_phone 
+        : (!isEmpty(meeting.lead_phone) ? meeting.lead_phone : null);
+      
+      const email = !isEmpty(meeting.customer_email) 
+        ? meeting.customer_email 
+        : (!isEmpty(meeting.lead_email) ? meeting.lead_email : null);
+      
+      const enriched = {
+        ...meeting,
+        // Always use enriched values
+        customer_name: customerName,
+        customer_phone: phone,
+        customer_email: email,
+        address: address,
+        state: !isEmpty(meeting.state) ? meeting.state : (meeting.lead_state || null),
+        // Check-in status
+        is_checked_in: meeting.has_checkin || meeting.status === 'Completed' || false,
+        business: meeting.lead_business || null,
+        gst_no: meeting.lead_gst_no || null,
+        product_names: meeting.lead_product_names || null,
+        lead_source: meeting.lead_lead_source || null
+      };
+      
+      console.log('Enriched meeting:', {
+        id: enriched.id,
+        customer_name: enriched.customer_name,
+        address: enriched.address
+      });
+      
+      return enriched;
+    });
+    
+    console.log('Enriched meetings sample:', enrichedMeetings[0]);
+    return enrichedMeetings;
   }
 
   /**
@@ -207,6 +377,26 @@ class MarketingMeeting extends BaseModel {
 
     const result = await query(sqlQuery, [id]);
     return result.rows.length > 0;
+  }
+
+  /**
+   * Clean up orphaned meetings (meetings without valid leads)
+   * @returns {Promise<number>} Number of meetings deleted
+   */
+  async cleanupOrphanedMeetings() {
+    const sqlQuery = `
+      DELETE FROM marketing_meetings
+      WHERE (lead_id IS NOT NULL OR customer_id IS NOT NULL)
+        AND NOT EXISTS (
+          SELECT 1 FROM department_head_leads dhl 
+          WHERE (marketing_meetings.lead_id IS NOT NULL AND dhl.id = marketing_meetings.lead_id)
+             OR (marketing_meetings.customer_id IS NOT NULL AND dhl.id = marketing_meetings.customer_id)
+        )
+      RETURNING id
+    `;
+
+    const result = await query(sqlQuery);
+    return result.rows.length;
   }
 
   /**

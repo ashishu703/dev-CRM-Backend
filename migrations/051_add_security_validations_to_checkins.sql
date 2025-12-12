@@ -71,3 +71,4 @@ COMMENT ON COLUMN marketing_check_ins.location_validated IS 'Whether location va
 COMMENT ON COLUMN marketing_check_ins.photo_taken_at IS 'Actual timestamp when photo was taken (from EXIF data)';
 COMMENT ON COLUMN marketing_check_ins.photo_source IS 'Source of photo: camera or upload';
 
+

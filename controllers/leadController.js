@@ -245,19 +245,63 @@ class LeadController {
   async delete(req, res) {
     try {
       const { id } = req.params;
-      const result = await Lead.delete(id);
+      const { getClient } = require('../config/database');
+      const client = await getClient();
 
-      if (!result || result.rowCount === 0) {
-        return res.status(404).json({
-          success: false,
-          message: 'Lead not found'
-        });
+      try {
+        await client.query('BEGIN');
+
+        // First, delete marketing check-ins associated with meetings for this lead
+        await client.query(
+          `DELETE FROM marketing_check_ins 
+           WHERE meeting_id IN (
+             SELECT id FROM marketing_meetings 
+             WHERE lead_id = $1 OR customer_id = $1
+           )`,
+          [id]
+        );
+
+        // Delete marketing meetings associated with this lead
+        await client.query(
+          'DELETE FROM marketing_meetings WHERE lead_id = $1 OR customer_id = $1',
+          [id]
+        );
+
+        // Delete from salesperson_leads if it exists (cascade delete)
+        await client.query(
+          'DELETE FROM salesperson_leads WHERE dh_lead_id = $1',
+          [id]
+        );
+
+        // Delete from department_head_leads
+        const dhResult = await client.query(
+          'DELETE FROM department_head_leads WHERE id = $1',
+          [id]
+        );
+
+        // Also delete from main leads table if it exists
+        const leadResult = await Lead.delete(id);
+
+        await client.query('COMMIT');
+
+        // Check if any deletion was successful
+        if ((dhResult && dhResult.rowCount > 0) || (leadResult && leadResult.rowCount > 0)) {
+          return res.json({
+            success: true,
+            message: 'Lead deleted successfully'
+          });
+        } else {
+          return res.status(404).json({
+            success: false,
+            message: 'Lead not found'
+          });
+        }
+      } catch (dbError) {
+        await client.query('ROLLBACK');
+        throw dbError;
+      } finally {
+        client.release();
       }
-
-      res.json({
-        success: true,
-        message: 'Lead deleted successfully'
-      });
     } catch (error) {
       console.error('Error deleting lead:', error);
       res.status(500).json({

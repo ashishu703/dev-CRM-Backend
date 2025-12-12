@@ -149,3 +149,4 @@ router.put('/check-ins/:id', MarketingCheckInController.update.bind(MarketingChe
 
 module.exports = router;
 
+

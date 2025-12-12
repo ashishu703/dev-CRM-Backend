@@ -145,7 +145,54 @@ class MarketingMeetingController {
         });
       }
 
-      const meetings = await MarketingMeeting.getAssignedTo(salespersonEmail);
+      logger.info('Fetching assigned meetings for:', { 
+        salespersonEmail, 
+        username: req.user?.username,
+        email: req.user?.email,
+        user: req.user 
+      });
+      
+      // Try both email and username to ensure we find all meetings
+      const meetingsByEmail = await MarketingMeeting.getAssignedTo(salespersonEmail);
+      const meetingsByUsername = req.user?.username && req.user?.username !== salespersonEmail
+        ? await MarketingMeeting.getAssignedTo(req.user.username)
+        : [];
+      
+      // Combine and deduplicate meetings
+      const meetingMap = new Map();
+      [...meetingsByEmail, ...meetingsByUsername].forEach(meeting => {
+        meetingMap.set(meeting.id, meeting);
+      });
+      const meetings = Array.from(meetingMap.values());
+      
+      // Log sample meeting to debug
+      if (meetings.length > 0) {
+        logger.info('Sample meeting data:', {
+          id: meetings[0].id,
+          customer_name: meetings[0].customer_name,
+          lead_customer: meetings[0].lead_customer,
+          lead_name: meetings[0].lead_name,
+          address: meetings[0].address,
+          lead_address: meetings[0].lead_address,
+          location: meetings[0].location,
+          lead_id: meetings[0].lead_id,
+          customer_id: meetings[0].customer_id
+        });
+      }
+      
+      logger.info('Found meetings:', { 
+        count: meetings.length, 
+        byEmail: meetingsByEmail.length,
+        byUsername: meetingsByUsername.length,
+        salespersonEmail,
+        username: req.user?.username
+      });
+
+      // Clean up orphaned meetings (meetings without valid leads) in the background
+      // This ensures we don't return stale data
+      MarketingMeeting.cleanupOrphanedMeetings().catch(err => {
+        logger.error('Error cleaning up orphaned meetings:', err);
+      });
 
       res.json({
         success: true,
