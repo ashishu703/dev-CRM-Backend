@@ -21,3 +21,4 @@ router.put('/batch', StockController.batchUpdateStock.bind(StockController));
 module.exports = router;
 
 
+

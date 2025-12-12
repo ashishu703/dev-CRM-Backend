@@ -26,6 +26,7 @@ const ticketRoutes = require('./routes/tickets');
 const securityLogRoutes = require('./routes/securityLogs');
 const stockRoutes = require('./routes/stock');
 const workOrderRoutes = require('./routes/workOrders');
+const marketingRoutes = require('./routes/marketing');
 const organizationRoutes = require('./routes/organizations');
 const tradeIndiaRoutes = require('./routes/tradeIndia');
 
@@ -135,6 +136,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/work-orders', workOrderRoutes);
+app.use('/api/marketing', marketingRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/admin', adminRoutes);

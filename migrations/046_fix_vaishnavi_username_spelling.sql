@@ -20,3 +20,4 @@ WHERE (LOWER(username) LIKE '%rajbhr%' AND LOWER(username) LIKE '%vaishnavi%')
 -- SELECT username, email FROM department_users WHERE LOWER(email) LIKE '%vaishnavi%' OR LOWER(username) LIKE '%vaishnavi%';
 
 
+
