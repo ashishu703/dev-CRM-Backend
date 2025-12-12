@@ -1,57 +1,446 @@
 const BaseModel = require('./BaseModel');
 
+const CONSTANTS = {
+  CUSTOMER_NAME_MAX_LENGTH: 100,
+  PHONE_MAX_LENGTH: 50,
+  BATCH_SIZE: 1000,
+  DUPLICATE_CHECK_BATCH_SIZE: 1500,
+  MAX_CUSTOMER_ID_ATTEMPTS: 100,
+  PARAMS_PER_ROW: 21
+};
+
+const FIELD_MAP = {
+  leadSource: 'lead_source',
+  productNames: 'product_names',
+  salesStatus: 'sales_status',
+  telecallerStatus: 'telecaller_status',
+  paymentStatus: 'payment_status',
+  gstNo: 'gst_no',
+  customerType: 'customer_type',
+  assignedSalesperson: 'assigned_salesperson',
+  assignedTelecaller: 'assigned_telecaller'
+};
+
+// Allowed fields for updates
+const ALLOWED_UPDATE_FIELDS = [
+  'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
+  'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
+  'phone', 'address', 'gstNo', 'state', 'customerType', 'date',
+  'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
+];
+
+// Data Validator Utility Class
+class DataValidator {
+  static truncateString(value, maxLength) {
+    const trimmed = (value || '').toString().trim();
+    return trimmed.length > maxLength ? trimmed.substring(0, maxLength) : trimmed;
+  }
+
+  static cleanPhone(phone) {
+    if (!phone) return null;
+    const cleaned = phone.toString().trim().replace(/\D/g, '');
+    return cleaned.length > 0 ? this.truncateString(cleaned, CONSTANTS.PHONE_MAX_LENGTH) : null;
+  }
+
+  static normalizeWhatsapp(whatsapp, phone) {
+    const cleaned = this.cleanPhone(whatsapp);
+    return cleaned || this.cleanPhone(phone);
+  }
+
+  static normalizeCustomerName(customer) {
+    return this.truncateString(customer, CONSTANTS.CUSTOMER_NAME_MAX_LENGTH) || null;
+  }
+
+  static normalizeGstNo(gstNo) {
+    // Handle all null/empty cases
+    if (gstNo === undefined || gstNo === null) {
+      return 'N/A';
+    }
+    
+    const trimmed = String(gstNo).trim();
+    if (trimmed === '' || trimmed.toLowerCase() === 'n/a' || trimmed === 'null') {
+      return 'N/A';
+    }
+    return trimmed.length > 50 ? trimmed.substring(0, 50) : trimmed;
+  }
+
+
+  static normalizeCustomerType(customerType) {
+    if (!customerType) return null;
+    const trimmed = String(customerType).trim();
+    return trimmed.length > 50 ? trimmed.substring(0, 50) : trimmed;
+  }
+
+  static normalizeDate(dateValue) {
+    if (!dateValue) return null;
+    
+    const dateStr = String(dateValue).trim();
+    if (!dateStr || dateStr === 'null' || dateStr === 'N/A') return null;
+    
+    if (dateStr.includes('-') || dateStr.includes('/')) {
+      const separator = dateStr.includes('-') ? '-' : '/';
+      const parts = dateStr.split(separator);
+      if (parts.length === 3) {
+        const [part1, part2, part3] = parts.map(p => p.trim());
+        if (part1.length === 2 && part3.length === 4) {
+          return `${part3}-${part2.padStart(2, '0')}-${part1.padStart(2, '0')}`;
+        }
+        if (part1.length === 4) {
+          return `${part1}-${part2.padStart(2, '0')}-${part3.padStart(2, '0')}`;
+        }
+      }
+    }
+    
+    try {
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+    } catch (e) {
+    }
+    
+    return null;
+  }
+
+  static validateRow(row) {
+    const name = this.normalizeCustomerName(row.customer);
+    const phone = this.cleanPhone(row.phone);
+    return name.length > 0 || (phone && phone.length > 0);
+  }
+}
+
+class QueryBuilder {
+  constructor() {
+    this.conditions = [];
+    this.values = [];
+    this.paramCount = 1;
+  }
+
+  addCondition(condition, value) {
+    if (value !== undefined && value !== null && value !== '') {
+      this.conditions.push(`${condition} = $${this.paramCount}`);
+      this.values.push(value);
+      this.paramCount++;
+    }
+    return this;
+  }
+
+  addSearchCondition(fields, searchTerm) {
+    if (!searchTerm) return this;
+    const searchFields = fields.map(field => `${field} ILIKE $${this.paramCount}`).join(' OR ');
+    this.conditions.push(`(${searchFields})`);
+    this.values.push(`%${searchTerm}%`);
+    this.paramCount++;
+    return this;
+  }
+
+  addInCondition(field, values, batchSize = CONSTANTS.DUPLICATE_CHECK_BATCH_SIZE) {
+    if (!values || values.length === 0) return [];
+    
+    const batches = [];
+    for (let i = 0; i < values.length; i += batchSize) {
+      batches.push(values.slice(i, i + batchSize));
+    }
+    return batches;
+  }
+
+  buildWhereClause() {
+    return this.conditions.length > 0 ? ` WHERE ${this.conditions.join(' AND ')}` : '';
+  }
+
+  getValues() {
+    return this.values;
+  }
+
+  getParamCount() {
+    return this.paramCount;
+  }
+}
+
+// Batch Processor Utility Class
+class BatchProcessor {
+  static splitIntoBatches(array, batchSize) {
+    const batches = [];
+    for (let i = 0; i < array.length; i += batchSize) {
+      batches.push(array.slice(i, i + batchSize));
+    }
+    return batches;
+  }
+
+  static async processBatches(batches, processor) {
+    const results = [];
+    for (const batch of batches) {
+      const result = await processor(batch);
+      results.push(result);
+    }
+    return results;
+  }
+}
+
+// Main Model Class
 class DepartmentHeadLead extends BaseModel {
   constructor() {
     super('department_head_leads');
   }
 
-  // Generate customer ID if not provided
   generateCustomerId() {
     const timestamp = Date.now().toString().slice(-6);
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     return `CUST-${timestamp}${random}`;
   }
 
+  generateUniqueCustomerId(existingIds, usedIds, index = 0) {
+    let attempts = 0;
+    let newId;
+    
+    while (attempts < CONSTANTS.MAX_CUSTOMER_ID_ATTEMPTS) {
+      newId = attempts === 0 ? this.generateCustomerId() : 
+              `CUST-${Date.now()}-${index}-${Math.floor(Math.random() * 10000)}`;
+      
+      if (!existingIds.has(newId) && !usedIds.has(newId)) {
+        return newId;
+      }
+      attempts++;
+    }
+    
+    return `CUST-${Date.now()}-${index}-${Math.floor(Math.random() * 10000)}`;
+  }
+
+  static normalizeForDB(value) {
+    if (value === null || value === undefined) return 'N/A';
+    const trimmed = String(value).trim();
+    return trimmed === '' || trimmed.toLowerCase() === 'n/a' ? 'N/A' : trimmed;
+  }
+
+  static normalizePaymentStatus(value) {
+    if (value === null || value === undefined) return 'PENDING';
+    const trimmed = String(value).trim().toUpperCase();
+    return ['PENDING', 'IN_PROGRESS', 'COMPLETED'].includes(trimmed) ? trimmed : 'PENDING';
+  }
+
+  static normalizeTelecallerStatus(value) {
+    if (value === null || value === undefined) return 'INACTIVE';
+    const trimmed = String(value).trim().toUpperCase();
+    return ['ACTIVE', 'INACTIVE'].includes(trimmed) ? trimmed : 'INACTIVE';
+  }
+
+  /**
+   * Prepares lead values for database insertion
+   * Logic: If field has data → save actual data, If field is empty → save 'N/A' to DB
+   * @param {Object} lead - Lead data object
+   * @param {string} createdBy - Creator email/identifier
+   * @returns {Array} - Array of values for SQL INSERT
+   */
+  prepareLeadValues(lead, createdBy) {
+    const customer = (lead.customer && DataValidator.normalizeCustomerName(lead.customer)) || 'N/A';
+    const phone = DataValidator.cleanPhone(lead.phone) || 'N/A';
+    const whatsapp = DataValidator.normalizeWhatsapp(lead.whatsapp, lead.phone) || 'N/A';
+    const customerType = (lead.customerType && DataValidator.normalizeCustomerType(lead.customerType)) || 'N/A';
+    const gstNo = DataValidator.normalizeGstNo(lead.gstNo);
+    const normalizedDate = DataValidator.normalizeDate(lead.date);
+
+    return [
+      lead.customerId || null,
+      customer,
+      DepartmentHeadLead.normalizeForDB(lead.email),
+      DepartmentHeadLead.normalizeForDB(lead.business),
+      DepartmentHeadLead.normalizeForDB(lead.leadSource),
+      DepartmentHeadLead.normalizeForDB(lead.productNames || lead.productNamesText),
+      DepartmentHeadLead.normalizeForDB(lead.category),
+      DepartmentHeadLead.normalizeForDB(lead.salesStatus),
+      lead.createdAt || null,
+      DepartmentHeadLead.normalizeTelecallerStatus(lead.telecallerStatus),
+      DepartmentHeadLead.normalizePaymentStatus(lead.paymentStatus),
+      phone,
+      DepartmentHeadLead.normalizeForDB(lead.address),
+      gstNo,
+      DepartmentHeadLead.normalizeForDB(lead.state),
+      customerType,
+      normalizedDate,
+      whatsapp,
+      DepartmentHeadLead.normalizeForDB(lead.assignedSalesperson),
+      DepartmentHeadLead.normalizeForDB(lead.assignedTelecaller),
+      createdBy || 'system'
+    ];
+  }
+
+  async checkDuplicatePhone(phone, createdBy) {
+    const result = await DepartmentHeadLead.query(
+      'SELECT id FROM department_head_leads WHERE created_by = $1 AND phone = $2 LIMIT 1',
+      [createdBy, phone]
+    );
+    return result.rows?.[0] || null;
+  }
+
+  async getExistingPhones(phones, createdBy) {
+    if (!phones || phones.length === 0) return new Set();
+    
+    const batches = BatchProcessor.splitIntoBatches(phones, CONSTANTS.DUPLICATE_CHECK_BATCH_SIZE);
+    const existingPhones = new Set();
+
+    for (const batch of batches) {
+      const placeholders = batch.map((_, idx) => `$${idx + 2}`).join(',');
+      const query = `SELECT phone FROM department_head_leads WHERE created_by = $1 AND phone IN (${placeholders})`;
+      const result = await DepartmentHeadLead.query(query, [createdBy, ...batch]);
+      
+      (result.rows || []).forEach(row => {
+        const phone = (row.phone || '').toString().trim();
+        if (phone) existingPhones.add(phone);
+      });
+    }
+
+    return existingPhones;
+  }
+
+  async getExistingCustomerIds(customerIds) {
+    if (!customerIds || customerIds.length === 0) return new Set();
+    
+    const batches = BatchProcessor.splitIntoBatches(customerIds, CONSTANTS.DUPLICATE_CHECK_BATCH_SIZE);
+    const existingIds = new Set();
+
+    for (const batch of batches) {
+      const placeholders = batch.map((_, idx) => `$${idx + 1}`).join(',');
+      const query = `SELECT customer_id FROM department_head_leads WHERE customer_id IN (${placeholders})`;
+      const result = await DepartmentHeadLead.query(query, batch);
+      
+      (result.rows || []).forEach(row => {
+        if (row.customer_id) existingIds.add(row.customer_id);
+      });
+    }
+
+    return existingIds;
+  }
+
+  assignUniqueCustomerIds(rows, existingCustomerIdSet) {
+    const usedCustomerIdsInBatch = new Set();
+    
+    return rows.map((row, index) => {
+      let customerId = row.customerId || null;
+      
+      const isDuplicate = customerId && 
+                         (existingCustomerIdSet.has(customerId) || usedCustomerIdsInBatch.has(customerId));
+      
+      if (isDuplicate) {
+        customerId = null;
+      }
+
+      if (!customerId) {
+        customerId = this.generateUniqueCustomerId(existingCustomerIdSet, usedCustomerIdsInBatch, index);
+      }
+
+      usedCustomerIdsInBatch.add(customerId);
+      return { ...row, customerId };
+    });
+  }
+
+  filterValidRows(rows, existingPhoneSet) {
+    const validRows = [];
+    const skippedRows = [];
+    
+    rows.forEach((row, index) => {
+      try {
+        const name = row.customer ? DataValidator.normalizeCustomerName(row.customer) : null;
+        const phone = row.phone ? DataValidator.cleanPhone(row.phone) : null;
+        
+        const nameIsEmpty = !name || (typeof name === 'string' && name.length === 0);
+        const phoneIsEmpty = !phone || (typeof phone === 'string' && phone.length === 0);
+        
+        if (nameIsEmpty && phoneIsEmpty) {
+          skippedRows.push({
+            rowIndex: index + 1,
+            row,
+            reason: 'Both customer name and phone number are missing'
+          });
+          return;
+        }
+        
+        if (phone && existingPhoneSet.has(phone)) {
+          skippedRows.push({
+            rowIndex: index + 1,
+            row,
+            reason: `Duplicate phone number: ${phone}`
+          });
+          return;
+        }
+        
+        // Validate date format - skip row if date is invalid
+        if (row.date) {
+          const normalizedDate = DataValidator.normalizeDate(row.date);
+          if (!normalizedDate) {
+            skippedRows.push({
+              rowIndex: index + 1,
+              row,
+              reason: `Invalid date format: ${row.date} (expected DD-MM-YYYY, DD/MM/YYYY, or YYYY-MM-DD)`
+            });
+            return;
+          }
+        }
+        
+        validRows.push(row);
+      } catch (error) {
+        skippedRows.push({
+          rowIndex: index + 1,
+          row,
+          reason: `Error processing row: ${error.message}`
+        });
+      }
+    });
+    
+    return { validRows, skippedRows };
+  }
+
+  buildInsertQuery(placeholders) {
+    return `
+      INSERT INTO department_head_leads (
+        customer_id, customer, email, business, lead_source, product_names, category,
+        sales_status, created, telecaller_status, payment_status,
+        phone, address, gst_no, state, customer_type, date,
+        whatsapp, assigned_salesperson, assigned_telecaller,
+        created_by, created_at, updated_at
+      ) VALUES ${placeholders}
+      ON CONFLICT (customer_id) DO NOTHING
+      RETURNING id
+    `;
+  }
+
+  generatePlaceholders(rowCount) {
+    let paramIndex = 1;
+    const placeholders = [];
+    
+    for (let i = 0; i < rowCount; i++) {
+      const rowParams = [];
+      for (let j = 0; j < CONSTANTS.PARAMS_PER_ROW; j++) {
+        rowParams.push(`$${paramIndex++}`);
+      }
+      placeholders.push(`(${rowParams.join(',')},NOW(),NOW())`);
+    }
+    
+    return placeholders.join(',');
+  }
+
+  async insertBatch(batch, createdBy) {
+    const placeholders = this.generatePlaceholders(batch.length);
+    const query = this.buildInsertQuery(placeholders);
+    const values = batch.flatMap(row => this.prepareLeadValues(row, createdBy));
+    
+    const result = await DepartmentHeadLead.query(query, values);
+    return {
+      rowCount: result.rowCount || 0,
+      rows: result.rows || []
+    };
+  }
+
   async createFromUi(uiLead, createdBy) {
-    // STRICT VALIDATION: Truncate customer name to max 100 chars
-    let customer = (uiLead.customer || '').toString().trim();
-    if (customer.length > 100) {
-      customer = customer.substring(0, 100);
-    }
+    const phone = DataValidator.cleanPhone(uiLead.phone);
     
-    // Clean phone: remove non-digits but allow longer numbers (up to 50 chars)
-    let phone = (uiLead.phone || '').toString().trim();
     if (phone) {
-      phone = phone.replace(/\D/g, ''); // Remove non-digits
-      // Allow up to 50 characters (no truncation)
-      if (phone.length > 50) {
-        phone = phone.substring(0, 50);
-      }
+      const existing = await this.checkDuplicatePhone(phone, createdBy);
+      if (existing) return existing;
     }
+
+    const customerId = uiLead.customerId || this.generateCustomerId();
+    const values = this.prepareLeadValues({ ...uiLead, customerId }, createdBy);
     
-    // Clean whatsapp: remove non-digits but allow longer numbers (up to 50 chars)
-    let whatsapp = (uiLead.whatsapp || '').toString().trim();
-    if (whatsapp) {
-      whatsapp = whatsapp.replace(/\D/g, ''); // Remove non-digits
-      // Allow up to 50 characters (no truncation)
-      if (whatsapp.length > 50) {
-        whatsapp = whatsapp.substring(0, 50);
-      }
-    } else if (phone) {
-      // If whatsapp is empty, use phone
-      whatsapp = phone;
-    }
-    
-    // Prevent duplicates per creator by phone
-    if (phone) {
-      const checkRes = await DepartmentHeadLead.query(
-        'SELECT id FROM department_head_leads WHERE created_by = $1 AND phone = $2 LIMIT 1',
-        [createdBy, phone]
-      );
-      if (checkRes.rows && checkRes.rows[0]) {
-        return checkRes.rows[0];
-      }
-    }
     const query = `
       INSERT INTO department_head_leads (
         customer_id, customer, email, business, lead_source, product_names, category,
@@ -63,190 +452,75 @@ class DepartmentHeadLead extends BaseModel {
       RETURNING id
     `;
 
-    // Generate customer_id if not provided
-    const customerId = uiLead.customerId || this.generateCustomerId();
-
-    const values = [
-      customerId,
-      customer || null,
-      uiLead.email || null,
-      uiLead.business || null,
-      uiLead.leadSource || null,
-      uiLead.productNames || uiLead.productNamesText || 'N/A',
-      uiLead.category || 'N/A',
-      uiLead.salesStatus || 'PENDING',
-      uiLead.createdAt || null,
-      uiLead.telecallerStatus || 'INACTIVE',
-      uiLead.paymentStatus || 'PENDING',
-      phone || null,
-      uiLead.address || null,
-      (uiLead.gstNo === undefined || uiLead.gstNo === null || String(uiLead.gstNo).trim() === '' ? 'N/A' : uiLead.gstNo),
-      uiLead.state || null,
-      uiLead.customerType || null,
-      uiLead.date || null,
-      whatsapp || null,
-      uiLead.assignedSalesperson || null,
-      uiLead.assignedTelecaller || null,
-      createdBy
-    ];
-
     const result = await DepartmentHeadLead.query(query, values);
-    return result.rows && result.rows[0] ? result.rows[0] : null;
+    return result.rows?.[0] || null;
   }
 
   async bulkCreateFromUi(rows, createdBy) {
-    if (!Array.isArray(rows) || rows.length === 0) return { rowCount: 0 };
-    // Deduplicate by phone within this creator: skip rows whose phone already exists for createdBy
-    const phones = Array.from(new Set(rows.map(r => (r.phone || '').toString().trim()).filter(p => p.length > 0)));
-    let existingPhoneSet = new Set();
-    if (phones.length > 0) {
-      const placeholdersPhones = phones.map((_, idx) => `$${idx + 2}`).join(',');
-      const q = `SELECT phone FROM department_head_leads WHERE created_by = $1 AND phone IN (${placeholdersPhones})`;
-      const res = await DepartmentHeadLead.query(q, [createdBy, ...phones]);
-      existingPhoneSet = new Set((res.rows || []).map(r => (r.phone || '').toString().trim()));
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { rowCount: 0, rows: [], duplicatesCount: 0 };
     }
 
-    // Check for existing customer_ids in database to avoid constraint violations
-    const customerIds = rows.map(r => r.customerId).filter(id => id != null && id !== '');
-    let existingCustomerIdSet = new Set();
-    if (customerIds.length > 0) {
-      const placeholdersCustomerIds = customerIds.map((_, idx) => `$${idx + 1}`).join(',');
-      const q = `SELECT customer_id FROM department_head_leads WHERE customer_id IN (${placeholdersCustomerIds})`;
-      const res = await DepartmentHeadLead.query(q, customerIds);
-      existingCustomerIdSet = new Set((res.rows || []).map(r => r.customer_id).filter(Boolean));
-    }
-
-    // Track customer_ids used in this batch to avoid duplicates within the batch
-    const usedCustomerIdsInBatch = new Set();
+    const phones = Array.from(new Set(
+      rows.map(r => DataValidator.cleanPhone(r.phone)).filter(Boolean)
+    ));
     
-    // Generate unique customer_ids for rows that don't have one or have duplicates
-    const rowsWithUniqueIds = rows.map((r, idx) => {
-      let customerId = r.customerId || null;
-      
-      // If customerId exists but is duplicate (in DB or in batch), generate new one
-      if (customerId && (existingCustomerIdSet.has(customerId) || usedCustomerIdsInBatch.has(customerId))) {
-        customerId = null; // Will be generated below
-      }
-      
-      // Generate customerId if not provided or was duplicate
-      if (!customerId) {
-        let newId;
-        let attempts = 0;
-        do {
-          newId = this.generateCustomerId();
-          attempts++;
-          // Prevent infinite loop
-          if (attempts > 100) {
-            newId = `CUST-${Date.now()}-${idx}-${Math.floor(Math.random() * 10000)}`;
-            break;
-          }
-        } while (existingCustomerIdSet.has(newId) || usedCustomerIdsInBatch.has(newId));
-        
-        customerId = newId;
-      }
-      
-      usedCustomerIdsInBatch.add(customerId);
-      
-      return {
-        ...r,
-        customerId: customerId
-      };
-    });
-
-    const filteredRows = rowsWithUniqueIds.filter(r => {
-      const name = (r.customer || '').toString().trim();
-      const p = (r.phone || '').toString().trim();
-      // Skip rows that are effectively empty (no name and no phone)
-      if (name.length === 0 && p.length === 0) return false;
-      // If phone exists, drop duplicates for this creator
-      if (p.length > 0 && existingPhoneSet.has(p)) return false;
-      return true;
-    });
+    const existingPhoneSet = await this.getExistingPhones(phones, createdBy);
+    const customerIds = rows.map(r => r.customerId).filter(Boolean);
+    const existingCustomerIdSet = await this.getExistingCustomerIds(customerIds);
+    
+    const rowsWithUniqueIds = this.assignUniqueCustomerIds(rows, existingCustomerIdSet);
+    const { validRows: filteredRows, skippedRows } = this.filterValidRows(rowsWithUniqueIds, existingPhoneSet);
+    const skippedRowsInfo = skippedRows.map(s => ({
+      row: s.rowIndex,
+      reason: s.reason
+    }));
+    
     if (filteredRows.length === 0) {
-      const duplicatesCount = rows.filter(r => {
-        const p = (r.phone || '').toString().trim();
-        return p.length > 0 && existingPhoneSet.has(p);
-      }).length;
-      return { rowCount: 0, rows: [], duplicatesCount };
+      const duplicatesCount = rows.length;
+      return { 
+        rowCount: 0, 
+        rows: [], 
+        duplicatesCount,
+        skippedRows: skippedRowsInfo
+      };
     }
-    let i = 1;
-    const placeholders = filteredRows.map(() =>
-      `($${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},$${i++},NOW(),NOW())`
-    ).join(',');
 
-    const query = `
-      INSERT INTO department_head_leads (
-        customer_id, customer, email, business, lead_source, product_names, category,
-        sales_status, created, telecaller_status, payment_status,
-        phone, address, gst_no, state, customer_type, date,
-        whatsapp, assigned_salesperson, assigned_telecaller,
-        created_by, created_at, updated_at
-      ) VALUES ${placeholders}
-      ON CONFLICT (customer_id) DO NOTHING
-      RETURNING id
-    `;
-
-    const values = filteredRows.flatMap((r) => {
-      // STRICT VALIDATION: Truncate customer name to max 100 chars
-      let customer = (r.customer || '').toString().trim();
-      if (customer.length > 100) {
-        customer = customer.substring(0, 100);
+    const batches = BatchProcessor.splitIntoBatches(filteredRows, CONSTANTS.BATCH_SIZE);
+    let totalRowCount = 0;
+    const allInsertedRows = [];
+    const batchSkippedRows = [];
+    
+    for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+      const batch = batches[batchIndex];
+      try {
+        const result = await this.insertBatch(batch, createdBy);
+        totalRowCount += result.rowCount;
+        allInsertedRows.push(...result.rows);
+      } catch (error) {
+        const startRow = batchIndex * CONSTANTS.BATCH_SIZE;
+        batch.forEach((row, idx) => {
+          batchSkippedRows.push({
+            row: startRow + idx + 1,
+            reason: `Database error: ${error.message}`
+          });
+        });
       }
-      
-      // Clean phone: remove non-digits but allow longer numbers (up to 50 chars)
-      let phone = (r.phone || '').toString().trim();
-      if (phone) {
-        phone = phone.replace(/\D/g, ''); // Remove non-digits
-        // Allow up to 50 characters (no truncation)
-        if (phone.length > 50) {
-          phone = phone.substring(0, 50);
-        }
-      }
-      
-      // Clean whatsapp: remove non-digits but allow longer numbers (up to 50 chars)
-      let whatsapp = (r.whatsapp || '').toString().trim();
-      if (whatsapp) {
-        whatsapp = whatsapp.replace(/\D/g, ''); // Remove non-digits
-        // Allow up to 50 characters (no truncation)
-        if (whatsapp.length > 50) {
-          whatsapp = whatsapp.substring(0, 50);
-        }
-      } else if (phone) {
-        // If whatsapp is empty, use phone
-        whatsapp = phone;
-      }
-      
-      return [
-        r.customerId, // Now guaranteed to be unique
-        customer || null,
-        r.email || null,
-        r.business || null,
-        r.leadSource || null,
-        r.productNames || r.productNamesText || 'N/A',
-        r.category || 'N/A',
-        r.salesStatus || 'PENDING',
-        r.createdAt || null,
-        r.telecallerStatus || 'INACTIVE',
-        r.paymentStatus || 'PENDING',
-        phone || null,
-        r.address || null,
-        (r.gstNo === undefined || r.gstNo === null || String(r.gstNo).trim() === '' ? 'N/A' : r.gstNo),
-        r.state || null,
-        r.customerType || null,
-        r.date || null,
-        whatsapp || null,
-        r.assignedSalesperson || null,
-        r.assignedTelecaller || null,
-        createdBy
-      ];
-    });
-    const insertResult = await DepartmentHeadLead.query(query, values);
-    const duplicatesCount = rows.length - filteredRows.length;
-    return { rowCount: insertResult.rowCount || 0, rows: insertResult.rows || [], duplicatesCount };
+    }
+    
+    const allSkippedRows = [...skippedRowsInfo, ...batchSkippedRows];
+    
+    const duplicateSkippedCount = skippedRowsInfo.filter(s => s.reason && s.reason.includes('Duplicate')).length;
+    return { 
+      rowCount: totalRowCount, 
+      rows: allInsertedRows, 
+      duplicatesCount: duplicateSkippedCount,
+      skippedRows: allSkippedRows
+    };
   }
 
-  async getAll(filters = {}, pagination = {}) {
-    let query = `
+  buildGetAllQuery(filters, pagination) {
+    const baseQuery = `
       SELECT 
         dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, 
         COALESCE(dhl.product_names, sl.product_type) AS product_names, dhl.category,
@@ -262,66 +536,28 @@ class DepartmentHeadLead extends BaseModel {
       LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
     `;
-    
-    const conditions = [];
-    const values = [];
-    let paramCount = 1;
 
-    // STRICT CHECK: Always filter by created_by (email) - mandatory
+    const builder = new QueryBuilder();
     if (filters.createdBy) {
-      conditions.push(`dhl.created_by = $${paramCount}`);
-      values.push(filters.createdBy);
-      paramCount++;
+      builder.addCondition('dhl.created_by', filters.createdBy);
     }
-
-    // STRICT CHECK: Filter by department type if provided
     if (filters.departmentType) {
-      conditions.push(`dh.department_type = $${paramCount}`);
-      values.push(filters.departmentType);
-      paramCount++;
+      builder.addCondition('dh.department_type', filters.departmentType);
     }
-
-    // STRICT CHECK: Filter by company name if provided
     if (filters.companyName) {
-      conditions.push(`dh.company_name = $${paramCount}`);
-      values.push(filters.companyName);
-      paramCount++;
+      builder.addCondition('dh.company_name', filters.companyName);
     }
+    builder.addSearchCondition(['dhl.customer', 'dhl.email', 'dhl.business'], filters.search);
+    builder.addCondition('dhl.state', filters.state);
+    builder.addCondition('dhl.product_names', filters.productType);
+    builder.addCondition('dhl.sales_status', filters.salesStatus);
 
-    // Add other filters
-    if (filters.search) {
-      conditions.push(`(dhl.customer ILIKE $${paramCount} OR dhl.email ILIKE $${paramCount} OR dhl.business ILIKE $${paramCount})`);
-      values.push(`%${filters.search}%`);
-      paramCount++;
-    }
+    let query = baseQuery + builder.buildWhereClause();
+    query += ' ORDER BY dhl.created_at ASC';
 
-    if (filters.state) {
-      conditions.push(`dhl.state = $${paramCount}`);
-      values.push(filters.state);
-      paramCount++;
-    }
+    const values = builder.getValues();
+    let paramCount = builder.getParamCount();
 
-    if (filters.productType) {
-      conditions.push(`dhl.product_names = $${paramCount}`);
-      values.push(filters.productType);
-      paramCount++;
-    }
-
-    if (filters.salesStatus) {
-      conditions.push(`dhl.sales_status = $${paramCount}`);
-      values.push(filters.salesStatus);
-      paramCount++;
-    }
-
-    // Add WHERE clause if conditions exist
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(' AND ')}`;
-    }
-
-    // Add ORDER BY (oldest first as requested)
-    query += ` ORDER BY dhl.created_at ASC`;
-
-    // Add pagination
     if (pagination.limit) {
       query += ` LIMIT $${paramCount}`;
       values.push(pagination.limit);
@@ -331,15 +567,19 @@ class DepartmentHeadLead extends BaseModel {
     if (pagination.offset) {
       query += ` OFFSET $${paramCount}`;
       values.push(pagination.offset);
-      paramCount++;
     }
 
+    return { query, values };
+  }
+
+  async getAll(filters = {}, pagination = {}) {
+    const { query, values } = this.buildGetAllQuery(filters, pagination);
     const result = await DepartmentHeadLead.query(query, values);
     return result.rows || [];
   }
 
-  async getById(id, userEmail = null, departmentType = null, companyName = null) {
-    let query = `
+  buildGetByIdQuery(id, userEmail, departmentType, companyName) {
+    const baseQuery = `
       SELECT 
         dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, dhl.product_names, dhl.category,
         dhl.sales_status, dhl.created, dhl.telecaller_status, dhl.payment_status,
@@ -357,108 +597,81 @@ class DepartmentHeadLead extends BaseModel {
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE dhl.id = $1
     `;
-    
-    const values = [id];
-    let paramCount = 2;
 
-    // STRICT CHECK: Verify ownership if user info is provided
-    if (userEmail) {
-      query += ` AND dhl.created_by = $${paramCount}`;
-      values.push(userEmail);
-      paramCount++;
-    }
+    const builder = new QueryBuilder();
+    builder.paramCount = 2;
+    builder.addCondition('dhl.created_by', userEmail);
+    builder.addCondition('dh.department_type', departmentType);
+    builder.addCondition('dh.company_name', companyName);
 
-    if (departmentType) {
-      query += ` AND dh.department_type = $${paramCount}`;
-      values.push(departmentType);
-      paramCount++;
-    }
+    const additionalConditions = builder.buildWhereClause();
+    const query = additionalConditions ? baseQuery + additionalConditions.replace('WHERE', 'AND') : baseQuery;
+    const values = [id, ...builder.getValues()];
 
-    if (companyName) {
-      query += ` AND dh.company_name = $${paramCount}`;
-      values.push(companyName);
-      paramCount++;
-    }
-
-    const result = await DepartmentHeadLead.query(query, values);
-    return result.rows && result.rows[0] ? result.rows[0] : null;
+    return { query, values };
   }
 
-  async updateById(id, updateData, userEmail = null, departmentType = null, companyName = null) {
-    const allowedFields = [
-      'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
-      'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
-      'phone', 'address', 'gstNo', 'state', 'customerType', 'date',
-      'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
-    ];
+  async getById(id, userEmail = null, departmentType = null, companyName = null) {
+    const { query, values } = this.buildGetByIdQuery(id, userEmail, departmentType, companyName);
+    const result = await DepartmentHeadLead.query(query, values);
+    return result.rows?.[0] || null;
+  }
 
-    const fieldMap = {
-      leadSource: 'lead_source',
-      productNames: 'product_names',
-      salesStatus: 'sales_status',
-      telecallerStatus: 'telecaller_status',
-      paymentStatus: 'payment_status',
-      gstNo: 'gst_no',
-      customerType: 'customer_type',
-      assignedSalesperson: 'assigned_salesperson',
-      assignedTelecaller: 'assigned_telecaller'
-    };
-
+  buildUpdateFields(updateData) {
     const updates = [];
     const values = [];
     let paramCount = 1;
 
-    Object.keys(updateData).forEach((key) => {
-      if (allowedFields.includes(key) && updateData[key] !== undefined) {
-        const column = fieldMap[key] || key;
+    Object.keys(updateData).forEach(key => {
+      if (ALLOWED_UPDATE_FIELDS.includes(key) && updateData[key] !== undefined) {
+        const column = FIELD_MAP[key] || key;
         updates.push(`${column} = $${paramCount++}`);
         values.push(updateData[key]);
       }
     });
 
+    return { updates, values, paramCount };
+  }
+
+  buildUpdateQuery(id, updateData, userEmail, departmentType, companyName) {
+    const { updates, values, paramCount } = this.buildUpdateFields(updateData);
+    
     if (updates.length === 0) {
-      return { rowCount: 0 };
+      return null;
     }
 
-    // STRICT CHECK: Add ownership verification in WHERE clause
     let query = `
       UPDATE department_head_leads dhl
       SET ${updates.join(', ')}, updated_at = NOW()
       FROM department_heads dh
       WHERE dhl.id = $${paramCount} AND dh.email = dhl.created_by
     `;
+    
     values.push(id);
-    paramCount++;
+    let nextParam = paramCount + 1;
 
-    if (userEmail) {
-      query += ` AND dhl.created_by = $${paramCount}`;
-      values.push(userEmail);
-      paramCount++;
+    const builder = new QueryBuilder();
+    builder.paramCount = nextParam;
+    builder.addCondition('dhl.created_by', userEmail);
+    builder.addCondition('dh.department_type', departmentType);
+    builder.addCondition('dh.company_name', companyName);
+
+    const additionalConditions = builder.buildWhereClause();
+    if (additionalConditions) {
+      query += additionalConditions.replace('WHERE', 'AND');
+      values.push(...builder.getValues());
     }
 
-    if (departmentType) {
-      query += ` AND dh.department_type = $${paramCount}`;
-      values.push(departmentType);
-      paramCount++;
-    }
-
-    if (companyName) {
-      query += ` AND dh.company_name = $${paramCount}`;
-      values.push(companyName);
-      paramCount++;
-    }
-
-    return await DepartmentHeadLead.query(query, values);
+    return { query, values };
   }
 
-  /**
-   * Transfer a lead to another user
-   * @param {number} id - Lead ID
-   * @param {string} transferredTo - User email or name to transfer to
-   * @param {string} transferredFrom - User email transferring from
-   * @param {string} reason - Transfer reason
-   * @returns {Promise<Object>} Query result
-   */
+  async updateById(id, updateData, userEmail = null, departmentType = null, companyName = null) {
+    const queryData = this.buildUpdateQuery(id, updateData, userEmail, departmentType, companyName);
+    if (!queryData) return { rowCount: 0 };
+    
+    return await DepartmentHeadLead.query(queryData.query, queryData.values);
+  }
+
   async transferLead(id, transferredTo, transferredFrom, reason = '') {
     const query = `
       UPDATE department_head_leads 
@@ -475,49 +688,15 @@ class DepartmentHeadLead extends BaseModel {
     return await DepartmentHeadLead.query(query, values);
   }
 
-  async updateManyForCreator(ids, updateData, createdBy, departmentType = null, companyName = null) {
-    if (!Array.isArray(ids) || ids.length === 0) return { rowCount: 0 };
-    const allowedFields = [
-      'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
-      'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
-      'phone', 'address', 'gstNo', 'state', 'customerType', 'date',
-      'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
-    ];
+  buildUpdateManyQuery(ids, updateData, createdBy, departmentType, companyName) {
+    const { updates, values, paramCount } = this.buildUpdateFields(updateData);
+    
+    if (updates.length === 0) return null;
 
-    const fieldMap = {
-      leadSource: 'lead_source',
-      productNames: 'product_names',
-      salesStatus: 'sales_status',
-      telecallerStatus: 'telecaller_status',
-      paymentStatus: 'payment_status',
-      gstNo: 'gst_no',
-      customerType: 'customer_type',
-      assignedSalesperson: 'assigned_salesperson',
-      assignedTelecaller: 'assigned_telecaller'
-    };
-
-    const updates = [];
-    const values = [];
-    let paramCount = 1;
-
-    Object.keys(updateData).forEach((key) => {
-      if (allowedFields.includes(key) && updateData[key] !== undefined) {
-        const column = fieldMap[key] || key;
-        updates.push(`${column} = $${paramCount++}`);
-        values.push(updateData[key]);
-      }
-    });
-
-    if (updates.length === 0) return { rowCount: 0 };
-
-    // Calculate parameter indices correctly
-    // paramCount is already at the next available index after updates
     const idStartIdx = paramCount;
-    const idPlaceholders = ids.map((_id, idx) => `$${idStartIdx + idx}`).join(',');
+    const idPlaceholders = ids.map((_, idx) => `$${idStartIdx + idx}`).join(',');
     const createdByIdx = idStartIdx + ids.length;
-    let nextParamIdx = createdByIdx + 1;
 
-    // STRICT CHECK: Add department and company verification via JOIN
     let query = `
       UPDATE department_head_leads dhl
       SET ${updates.join(', ')}, updated_at = NOW()
@@ -527,27 +706,89 @@ class DepartmentHeadLead extends BaseModel {
         AND dh.email = dhl.created_by
     `;
     
-    // Push ids and createdBy first
     values.push(...ids, createdBy);
+    let nextParam = createdByIdx + 1;
 
-    // Add department type check if provided
-    if (departmentType) {
-      query += ` AND dh.department_type = $${nextParamIdx}`;
-      values.push(departmentType);
-      nextParamIdx++;
+    const builder = new QueryBuilder();
+    builder.paramCount = nextParam;
+    builder.addCondition('dh.department_type', departmentType);
+    builder.addCondition('dh.company_name', companyName);
+
+    const additionalConditions = builder.buildWhereClause();
+    if (additionalConditions) {
+      query += additionalConditions.replace('WHERE', 'AND');
+      values.push(...builder.getValues());
     }
 
-    // Add company name check if provided
-    if (companyName) {
-      query += ` AND dh.company_name = $${nextParamIdx}`;
-      values.push(companyName);
-    }
-
-    return await DepartmentHeadLead.query(query, values);
+    return { query, values };
   }
 
-  async getStats(createdBy, departmentType = null, companyName = null) {
-    let query = `
+  async updateManyForCreator(ids, updateData, createdBy, departmentType = null, companyName = null) {
+    if (!Array.isArray(ids) || ids.length === 0) return { rowCount: 0 };
+    
+    const queryData = this.buildUpdateManyQuery(ids, updateData, createdBy, departmentType, companyName);
+    if (!queryData) return { rowCount: 0 };
+    
+    return await DepartmentHeadLead.query(queryData.query, queryData.values);
+  }
+
+  /**
+   * Bulk delete leads by IDs (scoped to creator for security)
+   * Also deletes associated salesperson leads
+   * @param {Array<number>} ids - Array of lead IDs to delete
+   * @param {string} createdBy - Creator email for security check
+   * @param {string} departmentType - Optional department type filter
+   * @param {string} companyName - Optional company name filter
+   * @returns {Promise<Object>} - Result with rowCount
+   */
+  async deleteManyForCreator(ids, createdBy, departmentType = null, companyName = null) {
+    if (!Array.isArray(ids) || ids.length === 0) return { rowCount: 0 };
+
+    const idPlaceholders = ids.map((_, idx) => `$${idx + 1}`).join(',');
+    const createdByIdx = ids.length + 1;
+    let paramCount = createdByIdx + 1;
+
+    const values = [...ids, createdBy];
+    let whereConditions = `dhl.id IN (${idPlaceholders}) AND dhl.created_by = $${createdByIdx} AND dh.email = dhl.created_by`;
+
+    if (departmentType) {
+      whereConditions += ` AND dh.department_type = $${paramCount}`;
+      values.push(departmentType);
+      paramCount++;
+    }
+
+    if (companyName) {
+      whereConditions += ` AND dh.company_name = $${paramCount}`;
+      values.push(companyName);
+      paramCount++;
+    }
+
+    // First delete associated salesperson leads
+    const deleteSalespersonQuery = `
+      DELETE FROM salesperson_leads
+      WHERE dh_lead_id IN (
+        SELECT dhl.id 
+        FROM department_head_leads dhl
+        JOIN department_heads dh ON dh.email = dhl.created_by
+        WHERE ${whereConditions}
+      )
+    `;
+    await DepartmentHeadLead.query(deleteSalespersonQuery, values);
+
+    // Then delete department_head_leads
+    const deleteDHQuery = `
+      DELETE FROM department_head_leads dhl
+      USING department_heads dh
+      WHERE ${whereConditions}
+      RETURNING dhl.id
+    `;
+    const result = await DepartmentHeadLead.query(deleteDHQuery, values);
+    
+    return { rowCount: result.rowCount || 0 };
+  }
+
+  buildStatsQuery(createdBy, departmentType, companyName) {
+    const baseQuery = `
       SELECT
         COUNT(*) as total,
         COUNT(CASE WHEN dhl.sales_status = 'PENDING' THEN 1 END) as pending,
@@ -560,26 +801,29 @@ class DepartmentHeadLead extends BaseModel {
         COUNT(CASE WHEN dhl.payment_status = 'COMPLETED' THEN 1 END) as completed_payments
       FROM department_head_leads dhl
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
-      WHERE dhl.created_by = $1
     `;
+
+    const builder = new QueryBuilder();
+    builder.paramCount = 1;
     
-    const values = [createdBy];
-    let paramCount = 2;
-
-    // STRICT CHECK: Add department and company filters
-    if (departmentType) {
-      query += ` AND dh.department_type = $${paramCount}`;
-      values.push(departmentType);
-      paramCount++;
+    if (createdBy) {
+      builder.addCondition('dhl.created_by', createdBy);
     }
+    builder.addCondition('dh.department_type', departmentType);
+    builder.addCondition('dh.company_name', companyName);
 
-    if (companyName) {
-      query += ` AND dh.company_name = $${paramCount}`;
-      values.push(companyName);
-    }
+    const whereClause = builder.buildWhereClause();
+    const query = baseQuery + whereClause;
+    const values = builder.getValues();
 
+    return { query, values };
+  }
+
+  async getStats(createdBy, departmentType = null, companyName = null) {
+    const { query, values } = this.buildStatsQuery(createdBy, departmentType, companyName);
     const result = await DepartmentHeadLead.query(query, values);
-    return result.rows && result.rows[0] ? result.rows[0] : {
+    
+    return result.rows?.[0] || {
       total: 0,
       pending: 0,
       in_progress: 0,
@@ -593,6 +837,6 @@ class DepartmentHeadLead extends BaseModel {
   }
 }
 
-module.exports = new DepartmentHeadLead();
-
-
+const instance = new DepartmentHeadLead();
+instance.DataValidator = DataValidator;
+module.exports = instance;

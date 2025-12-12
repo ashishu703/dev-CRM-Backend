@@ -1,19 +1,81 @@
 const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const SalespersonLead = require('../models/SalespersonLead');
+const DataValidator = DepartmentHeadLead.DataValidator;
 const logger = require('../utils/logger');
 
-/**
- * LeadAssignmentService
- * - Keeps salesperson_leads table synchronized with department_head_leads
- * - Ensures salesperson_leads.id equals department_head_leads.id for 1:1 relation
- */
+
 class LeadAssignmentService {
+  /**
+   * Normalizes phone/whatsapp value - returns 'N/A' if empty/null
+   * Applies DRY principle for phone normalization
+   * @param {*} value - Phone or whatsapp value to normalize
+   * @returns {string} - Normalized phone value or 'N/A'
+   */
+  normalizePhoneValue(value) {
+    if (value === null || value === undefined) {
+      return 'N/A';
+    }
+    const trimmed = String(value).trim();
+    if (trimmed.length === 0 || trimmed.toLowerCase() === 'null') {
+      return 'N/A';
+    }
+    return trimmed;
+  }
+
+  /**
+   * Extracts a valid phone number from various sources
+   * Tries phone field, then whatsapp, then existing lead, finally generates placeholder
+   * @param {Object} dhLead - Department head lead object
+   * @param {Object} existingLead - Existing salesperson lead (optional)
+   * @returns {string} - Valid phone number or 'N/A'
+   */
+  extractPhoneNumber(dhLead, existingLead = null) {
+    // Try phone field first
+    let phone = this.normalizePhoneValue(dhLead.phone);
+    if (phone !== 'N/A') {
+      return phone;
+    }
+
+    // Try whatsapp field as fallback
+    phone = this.normalizePhoneValue(dhLead.whatsapp);
+    if (phone !== 'N/A') {
+      return phone;
+    }
+
+    // Check existing salesperson lead to preserve data
+    if (existingLead && existingLead.phone) {
+      phone = this.normalizePhoneValue(existingLead.phone);
+      if (phone !== 'N/A') {
+        return phone;
+      }
+    }
+
+    // Return 'N/A' as valid phone value (database accepts this string)
+    return 'N/A';
+  }
+
+  /**
+   * Extracts safe name from various fields
+   * @param {Object} dhLead - Department head lead object
+   * @returns {string} - Safe name for the lead
+   */
+  extractSafeName(dhLead) {
+    return (dhLead.customer && dhLead.customer.trim()) ||
+           (dhLead.business && dhLead.business.trim()) ||
+           (dhLead.customer_id && String(dhLead.customer_id).trim()) ||
+           `Lead-${dhLead.id || 'Unknown'}`;
+  }
+
   /**
    * Sync a DH lead into salesperson_leads if assigned to any department user
    * Always upserts by using the DH lead id as the PK in salesperson_leads
+   * No fields are mandatory - all can be 'N/A' if not provided
    */
   async syncSalespersonLead(dhLeadId) {
-    if (!dhLeadId) return;
+    if (!dhLeadId) {
+      logger.warn('syncSalespersonLead: No dhLeadId provided');
+      return;
+    }
 
     const dhLead = await DepartmentHeadLead.getById(dhLeadId);
     if (!dhLead) {
@@ -27,88 +89,58 @@ class LeadAssignmentService {
       return;
     }
 
-    // Directly copy all fields from DH lead
-    const safeName = (dhLead.customer && dhLead.customer.trim())
-      || (dhLead.business && dhLead.business.trim())
-      || (dhLead.phone && String(dhLead.phone).trim())
-      || (dhLead.customer_id && String(dhLead.customer_id).trim())
-      || 'Unknown';
+    // Get existing lead to preserve data if it exists
+    const existingLead = await SalespersonLead.getById(dhLead.id);
 
-    // Ensure phone is never null - use existing data from department_head_leads
-    // Check phone field first, then whatsapp as fallback
-    let phone = null;
-    
-    // Try phone field - check for null, undefined, empty string, and "N/A"
-    if (dhLead.phone !== null && dhLead.phone !== undefined) {
-      const phoneStr = String(dhLead.phone).trim();
-      if (phoneStr.length > 0 && phoneStr.toLowerCase() !== 'n/a' && phoneStr !== 'null') {
-        phone = phoneStr;
-      }
-    }
-    
-    // If phone is still null/empty, try whatsapp field
-    if (!phone || phone.length === 0) {
-      if (dhLead.whatsapp !== null && dhLead.whatsapp !== undefined) {
-        const whatsappStr = String(dhLead.whatsapp).trim();
-        if (whatsappStr.length > 0 && whatsappStr.toLowerCase() !== 'n/a' && whatsappStr !== 'null') {
-          phone = whatsappStr;
-        }
-      }
-    }
-    
-    // If still no phone, check existing salesperson lead to preserve existing data
-    if (!phone || phone.length === 0) {
-      const existingLead = await SalespersonLead.getById(dhLead.id);
-      if (existingLead && existingLead.phone) {
-        const existingPhoneStr = String(existingLead.phone).trim();
-        if (existingPhoneStr.length > 0 && existingPhoneStr.toLowerCase() !== 'n/a' && existingPhoneStr !== 'null') {
-          phone = existingPhoneStr;
-        }
-      }
-    }
-    
+    // Extract normalized values using helper methods
+    const safeName = this.extractSafeName(dhLead);
+    const phone = this.extractPhoneNumber(dhLead, existingLead);
+    const whatsapp = this.normalizePhoneValue(dhLead.whatsapp) || phone;
+
     // Log for debugging
     logger.info(`syncSalespersonLead: Lead ${dhLead.id} - phone from dhLead: ${dhLead.phone}, whatsapp: ${dhLead.whatsapp}, final phone: ${phone}`);
-    
-    // Final check: if no phone available, skip sync (should not happen if data exists in department_head_leads)
-    if (!phone || phone.length === 0) {
-      logger.warn(`Skipping sync for lead ${dhLead.id} (${safeName}) - no phone/mobile number found. dhLead.phone=${dhLead.phone}, dhLead.whatsapp=${dhLead.whatsapp}`);
-      return;
-    }
-    
-    // Use whatsapp from dhLead, fallback to phone if whatsapp is empty
-    let whatsapp = null;
-    if (dhLead.whatsapp !== null && dhLead.whatsapp !== undefined) {
-      const whatsappStr = String(dhLead.whatsapp).trim();
-      if (whatsappStr.length > 0 && whatsappStr.toLowerCase() !== 'n/a' && whatsappStr !== 'null') {
-        whatsapp = whatsappStr;
-      }
-    }
-    if (!whatsapp) {
-      whatsapp = phone; // Use phone as fallback for whatsapp
-    }
 
+    /**
+     * Helper to preserve actual data from department_head_leads
+     * Returns actual value if present, null only if truly null/undefined
+     * @param {*} value - Value from department_head_leads
+     * @returns {string|null} - Actual value or null
+     */
+    const preserveData = (value) => {
+      if (value === null || value === undefined) return null;
+      const trimmed = String(value).trim();
+      // Preserve actual data even if it's 'N/A' (don't convert to null)
+      return trimmed === '' ? null : trimmed;
+    };
+
+    // Build upsert payload - preserve actual data from department_head_leads
     const upsertPayload = {
       id: dhLead.id,
       dh_lead_id: dhLead.id,
       name: safeName,
-      phone: phone, // Ensured to be non-empty
-      email: dhLead.email,
-      business: dhLead.business,
-      address: dhLead.address,
-      gst_no: dhLead.gst_no,
-      product_type: dhLead.product_names,
-      state: dhLead.state,
-      lead_source: dhLead.lead_source,
-      customer_type: dhLead.customer_type,
-      date: dhLead.date,
-      sales_status: dhLead.sales_status,
+      phone: phone, // Always has a value (either actual phone or 'N/A')
+      email: preserveData(dhLead.email),
+      business: preserveData(dhLead.business),
+      address: preserveData(dhLead.address),
+      gst_no: preserveData(dhLead.gst_no) || 'N/A', // Required field
+      product_type: preserveData(dhLead.product_names),
+      state: preserveData(dhLead.state),
+      lead_source: preserveData(dhLead.lead_source),
+      customer_type: preserveData(dhLead.customer_type),
+      date: DataValidator.normalizeDate(dhLead.date),
+      sales_status: preserveData(dhLead.sales_status),
       whatsapp: whatsapp,
-      created_by: dhLead.created_by,
+      created_by: dhLead.created_by || 'system',
     };
 
-    logger.info(`syncSalespersonLead: Upserting lead ${dhLead.id} with phone: ${phone}`);
-    await SalespersonLead.upsertById(upsertPayload);
+    logger.info(`syncSalespersonLead: Upserting lead ${dhLead.id} with phone: ${phone}, name: ${safeName}`);
+    try {
+      await SalespersonLead.upsertById(upsertPayload);
+      logger.info(`syncSalespersonLead: Successfully synced lead ${dhLead.id} to salesperson_leads`);
+    } catch (error) {
+      logger.error(`syncSalespersonLead: Error syncing lead ${dhLead.id} to salesperson_leads: ${error.message}`);
+      // Skip this lead and continue - don't throw to allow other leads to sync
+    }
   }
 }
 

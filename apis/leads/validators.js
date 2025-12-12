@@ -23,10 +23,12 @@ const createLeadSchema = [
     .withMessage('Please provide a valid Indian phone number'),
   
   body('email')
-    .optional()
+    .optional({ nullable: true, checkFalsy: true })
     .custom((value) => {
-      if (value === null || value === undefined || value === '') return true;
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+      if (value === null || value === undefined || value === '' || value === 'N/A' || String(value).trim().toLowerCase() === 'n/a') {
+        return true;
+      }
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value));
     })
     .withMessage('Please provide a valid email address'),
   
@@ -125,10 +127,16 @@ const updateLeadSchema = [
     .withMessage('Please provide a valid Indian phone number'),
   
   body('email')
-    .optional()
+    .optional({ nullable: true, checkFalsy: true })
     .custom((value) => {
-      if (value === null || value === undefined || value === '') return true;
-      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+      if (value === null || value === undefined || value === '' || value === 'N/A' || (typeof value === 'string' && value.trim().toLowerCase() === 'n/a')) {
+        return true;
+      }
+      const emailStr = String(value).trim();
+      if (emailStr === '' || emailStr.toLowerCase() === 'n/a') {
+        return true; // Treat as no email
+      }
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr);
     })
     .withMessage('Please provide a valid email address'),
   
@@ -217,8 +225,8 @@ const querySchema = [
   
   query('limit')
     .optional()
-    .isInt({ min: 1, max: 1000 })
-    .withMessage('Limit must be between 1 and 1000'),
+    .isInt({ min: 1, max: 50000 })
+    .withMessage('Limit must be between 1 and 50000'),
   
   query('search')
     .optional()
@@ -261,6 +269,17 @@ const idParamSchema = [
 ];
 
 // Validation rules for batch update
+// Validation schema for bulk delete
+const bulkDeleteSchema = [
+  body('ids')
+    .isArray({ min: 1 })
+    .withMessage('ids must be a non-empty array')
+    .custom((ids) => {
+      return ids.every(id => Number.isInteger(id) && id > 0);
+    })
+    .withMessage('All IDs must be positive integers')
+];
+
 const batchUpdateSchema = [
   body('ids')
     .isArray({ min: 1 })
@@ -280,5 +299,6 @@ module.exports = {
   importCSVSchema,
   idParamSchema,
   batchUpdateSchema,
+  bulkDeleteSchema,
   salespersonLeadUpdateSchema: []
 };

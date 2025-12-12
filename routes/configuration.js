@@ -34,5 +34,11 @@ router.post('/templates', configurationController.createEmailTemplate);
 router.put('/templates/:id', configurationController.updateEmailTemplate);
 router.delete('/templates/:id', configurationController.deleteEmailTemplate);
 
+// Document templates (quotation / PI / work orders)
+router.get('/document-templates', configurationController.getDocumentTemplates);
+router.post('/document-templates', configurationController.createDocumentTemplate);
+router.put('/document-templates/:id', configurationController.updateDocumentTemplate);
+router.delete('/document-templates/:id', configurationController.deleteDocumentTemplate);
+
 module.exports = router;
 

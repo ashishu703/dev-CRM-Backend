@@ -52,6 +52,8 @@ class ProformaInvoiceController {
         validUntil: req.body.validUntil,
         status: req.body.status || 'draft',
         createdBy: req.user.email,
+        // Template key - REQUIRED for PI rendering
+        template: req.body.template,
         // Adjusted amounts for remaining amount PIs (if provided)
         subtotal: req.body.subtotal,
         taxAmount: req.body.taxAmount || req.body.tax_amount,
@@ -242,14 +244,16 @@ class ProformaInvoiceController {
   }
 
   // Get PIs for multiple quotations (bulk)
+  // OPTIMIZED: Supports both GET (query) and POST (body) to handle large arrays
   async getBulkByQuotations(req, res) {
     try {
-      const { quotationIds } = req.query;
+      // Support both GET (query) and POST (body) for backward compatibility and large arrays
+      const quotationIds = req.body?.quotationIds || req.query?.quotationIds;
       
       if (!quotationIds) {
         return res.status(400).json({
           success: false,
-          message: 'quotationIds query parameter is required'
+          message: 'quotationIds is required (query parameter for GET or body for POST)'
         });
       }
 

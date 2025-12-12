@@ -11,19 +11,54 @@ async function runMigrations() {
       .filter((f) => f.endsWith('.sql'))
       .sort();
 
+    // Track applied migrations so we don't keep re‑running old ones
+    await query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        id SERIAL PRIMARY KEY,
+        filename VARCHAR(255) UNIQUE NOT NULL,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     for (const file of files) {
-      const filePath = path.join(migrationsDir, file);
-      if (file === '035_payments_credits_and_fks.sql') {
-        // Run via JS to be portable
-        logger.info('Running migration: 035_payments_credits_and_fks (JS)');
-        await run035();
-        logger.info('Completed migration: 035_payments_credits_and_fks (JS)');
+      const alreadyApplied = await query(
+        'SELECT 1 FROM schema_migrations WHERE filename = $1',
+        [file]
+      );
+
+      if (alreadyApplied.rows.length > 0) {
+        logger.info(`Skipping already applied migration: ${file}`);
         continue;
       }
-      const sql = fs.readFileSync(filePath, 'utf8');
+
+      const filePath = path.join(migrationsDir, file);
+
       logger.info(`Running migration: ${file}`);
-      await query(sql);
-      logger.info(`Completed migration: ${file}`);
+
+      // Run each migration in its own transaction so failures don't leave DB half‑applied
+      await query('BEGIN');
+      try {
+        if (file === '035_payments_credits_and_fks.sql') {
+          // Run via JS to be portable
+          logger.info('Executing 035_payments_credits_and_fks via JS helper');
+          await run035();
+        } else {
+          const sql = fs.readFileSync(filePath, 'utf8');
+          await query(sql);
+        }
+
+        await query(
+          'INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING',
+          [file]
+        );
+
+        await query('COMMIT');
+        logger.info(`Completed migration: ${file}`);
+      } catch (err) {
+        await query('ROLLBACK');
+        logger.error(`Migration failed for ${file}`, err);
+        throw err;
+      }
     }
 
     logger.info('All migrations completed successfully');

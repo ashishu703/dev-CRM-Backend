@@ -52,7 +52,8 @@ class LeadController {
         search,
         state,
         productType,
-        connectedStatus
+        connectedStatus,
+        departmentType
       } = req.query;
 
       const filters = {};
@@ -61,15 +62,34 @@ class LeadController {
       if (productType) filters.productType = productType;
       if (connectedStatus) filters.connectedStatus = connectedStatus;
       
-      // STRICT CHECK: Always scope to the authenticated creator (department head)
-      filters.createdBy = req.user.email;
+      const isSuperAdmin = req.user.role === 'SUPERADMIN' || req.user.role === 'superadmin';
       
-      // STRICT CHECK: Add department and company filters to prevent cross-department access
-      if (req.user.departmentType) {
-        filters.departmentType = req.user.departmentType;
+      // Allow SuperAdmin to filter by departmentType if provided in query params
+      if (isSuperAdmin && departmentType) {
+        filters.departmentType = departmentType;
       }
-      if (req.user.companyName) {
-        filters.companyName = req.user.companyName;
+      
+      if (!isSuperAdmin) {
+        // If departmentType is explicitly provided in query params, treat it like SuperAdmin
+        // This allows department heads to see all leads from their department (not just created by them)
+        // This ensures consistency with SuperAdmin dashboard when viewing same department
+        if (departmentType) {
+          filters.departmentType = departmentType;
+          // Still filter by companyName for department heads to ensure data isolation
+          if (req.user.companyName) {
+            filters.companyName = req.user.companyName;
+          }
+        } else {
+          // Default behavior: filter by createdBy for department heads when no departmentType param
+          filters.createdBy = req.user.email;
+          
+          if (req.user.departmentType) {
+            filters.departmentType = req.user.departmentType;
+          }
+          if (req.user.companyName) {
+            filters.companyName = req.user.companyName;
+          }
+        }
       }
 
       const pagination = {
@@ -78,13 +98,17 @@ class LeadController {
       };
 
       const leads = await DepartmentHeadLead.getAll(filters, pagination);
-      
-      // STRICT CHECK: Add department and company filters for stats
-      const stats = await DepartmentHeadLead.getStats(
-        req.user.email,
-        req.user.departmentType,
-        req.user.companyName
-      );
+
+      // Calculate stats - if departmentType is provided in query params, use same logic as SuperAdmin
+      const stats = isSuperAdmin 
+        ? await DepartmentHeadLead.getStats(null, departmentType || null, null)
+        : departmentType 
+          ? await DepartmentHeadLead.getStats(null, departmentType, req.user.companyName || null)
+          : await DepartmentHeadLead.getStats(
+              req.user.email,
+              req.user.departmentType,
+              req.user.companyName
+            );
 
       res.json({
         success: true,
@@ -106,12 +130,10 @@ class LeadController {
     }
   }
 
-  // Get lead by ID
   async getById(req, res) {
     try {
       const { id } = req.params;
       
-      // STRICT CHECK: Verify ownership - only return lead if it belongs to logged-in user's department and company
       const lead = await DepartmentHeadLead.getById(
         id,
         req.user.email,
@@ -312,6 +334,48 @@ class LeadController {
     }
   }
 
+  // Bulk delete leads (scoped to creator)
+  async bulkDelete(req, res) {
+    try {
+      const { ids } = req.body;
+      
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Lead IDs array is required'
+        });
+      }
+
+      // STRICT CHECK: Verify ownership before deleting
+      const result = await DepartmentHeadLead.deleteManyForCreator(
+        ids,
+        req.user.email,
+        req.user.departmentType,
+        req.user.companyName
+      );
+
+      if (result.rowCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'No leads found or you do not have permission to delete these leads'
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: `Successfully deleted ${result.rowCount} lead(s)`,
+        deletedCount: result.rowCount
+      });
+    } catch (error) {
+      console.error('Error bulk deleting leads:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to delete leads',
+        error: error.message
+      });
+    }
+  }
+
   // Import leads from CSV
   async importCSV(req, res) {
     try {
@@ -350,10 +414,24 @@ class LeadController {
 
       const importedCount = result?.rowCount ?? 0;
       const duplicatesCount = result?.duplicatesCount ?? 0;
+      const skippedRows = result?.skippedRows || [];
+      let message = `Successfully imported ${importedCount} lead(s)`;
+      if (duplicatesCount > 0) {
+        message += `, ${duplicatesCount} duplicate(s) skipped`;
+      }
+      if (skippedRows.length > 0) {
+        message += `, ${skippedRows.length} row(s) skipped due to validation errors`;
+      }
+      
       res.status(201).json({
         success: true,
-        message: `Successfully imported ${importedCount} leads${duplicatesCount ? `, ${duplicatesCount} duplicate(s) skipped` : ''}`,
-        data: { importedCount, duplicatesCount }
+        message,
+        data: { 
+          importedCount, 
+          duplicatesCount,
+          skippedCount: skippedRows.length,
+          skippedRows: skippedRows.slice(0, 50)
+        }
       });
     } catch (error) {
       console.error('Error importing CSV:', error);

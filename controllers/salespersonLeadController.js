@@ -14,14 +14,42 @@ class SalespersonLeadController {
   async listForLoggedInUser(req, res) {
     try {
       const username = req.user?.username;
-      if (!username) {
-        return res.status(400).json({ success: false, message: 'Username not available in token' });
+      const userEmail = req.user?.email;
+      if (!username && !userEmail) {
+        return res.status(400).json({ success: false, message: 'Username or email not available in token' });
       }
       // STRICT CHECK: Filter by department and company to prevent cross-department access
       const departmentType = req.user?.departmentType || null;
       const companyName = req.user?.companyName || null;
-      const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
-      return res.json({ success: true, data: rows });
+      
+      // DEBUG: Log username and email for troubleshooting
+      console.log(`[SalespersonLeadController] Fetching leads for username: ${username}, email: ${userEmail}, departmentType: ${departmentType}, companyName: ${companyName}`);
+      
+      // OPTIMIZED: Support pagination and document status
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const includeDocStatus = req.query.includeDocStatus === 'true' || req.query.includeDocStatus === true;
+      
+      if (includeDocStatus) {
+        // Use optimized method with document status
+        const result = await SalespersonLead.listForUserWithDocStatus(username, departmentType, companyName, page, limit, userEmail);
+        console.log(`[SalespersonLeadController] Found ${result.total} total leads for username: ${username}, email: ${userEmail}`);
+        return res.json({ 
+          success: true, 
+          data: result.leads,
+          pagination: {
+            page: result.page,
+            limit: result.limit,
+            total: result.total,
+            totalPages: result.totalPages
+          }
+        });
+      } else {
+        // Backward compatibility: return all leads without pagination
+        const rows = await SalespersonLead.listForUser(username, departmentType, companyName, userEmail);
+        console.log(`[SalespersonLeadController] Found ${rows.length} leads for username: ${username}, email: ${userEmail}`);
+        return res.json({ success: true, data: rows });
+      }
     } catch (error) {
       console.error('Error fetching salesperson leads (self):', error);
       return res.status(500).json({ success: false, message: 'Failed to fetch leads', error: error.message });
@@ -37,7 +65,8 @@ class SalespersonLeadController {
       // STRICT CHECK: Filter by department and company to prevent cross-department access
       const departmentType = req.user?.departmentType || null;
       const companyName = req.user?.companyName || null;
-      const rows = await SalespersonLead.listForUser(username, departmentType, companyName);
+      const userEmail = req.user?.email || null;
+      const rows = await SalespersonLead.listForUser(username, departmentType, companyName, userEmail);
       return res.json({ success: true, data: rows });
     } catch (error) {
       console.error('Error fetching salesperson leads (by username):', error);
@@ -48,8 +77,39 @@ class SalespersonLeadController {
   async getById(req, res) {
     try {
       const { id } = req.params;
-      const row = await SalespersonLead.getById(id);
-      if (!row) return res.status(404).json({ success: false, message: 'Lead not found' });
+      const isSuperAdmin = req.user?.role === 'SUPERADMIN' || req.user?.role === 'superadmin';
+      
+      // For SuperAdmin, allow access to any lead without department/company restrictions
+      if (isSuperAdmin) {
+        const row = await SalespersonLead.getById(id);
+        if (!row) {
+          return res.status(404).json({ 
+            success: false, 
+            message: 'Lead not found' 
+          });
+        }
+        return res.json({ success: true, data: row });
+      }
+      
+      // For non-SuperAdmin users, check assignment and department restrictions
+      const username = req.user?.username;
+      if (!username) {
+        return res.status(400).json({ success: false, message: 'Username not available in token' });
+      }
+      
+      // STRICT CHECK: Verify the lead is assigned to the logged-in user
+      const departmentType = req.user?.departmentType || null;
+      const companyName = req.user?.companyName || null;
+      const userEmail = req.user?.email || null;
+      const row = await SalespersonLead.getByIdForUser(id, username, departmentType, companyName, userEmail);
+      
+      if (!row) {
+        return res.status(404).json({ 
+          success: false, 
+          message: 'Lead not found or you do not have access to this lead' 
+        });
+      }
+      
       return res.json({ success: true, data: row });
     } catch (error) {
       console.error('Error fetching salesperson lead by id:', error);
@@ -81,28 +141,93 @@ class SalespersonLeadController {
       } catch (_) {}
       const username = req.user?.username;
       const ui = req.body || {};
+      
+      console.log('Received form data:', {
+        name: ui.name,
+        phone: ui.phone,
+        email: ui.email,
+        business: ui.business,
+        address: ui.address,
+        state: ui.state,
+        product_type: ui.product_type,
+        lead_source: ui.lead_source,
+        customer_type: ui.customer_type
+      });
 
-      // Build UI payload for DH model
-      const customerType = ui.customer_type || ui.customerType || null;
+      /**
+       * Normalizes field values - preserves actual data, converts empty to 'N/A' for DB
+       * Applies DRY principle for data normalization
+       * @param {*} value - Field value to normalize
+       * @param {boolean} isRequired - Whether field is required (defaults to 'N/A' if empty)
+       * @returns {string|null} - Normalized value (actual data preserved, empty becomes 'N/A' for required fields)
+       */
+      const normalizeField = (value, isRequired = false) => {
+        // Handle null/undefined - return 'N/A' for required fields, null for optional
+        if (value === undefined || value === null) {
+          return isRequired ? 'N/A' : null;
+        }
+        
+        const trimmed = String(value).trim();
+        
+        // If empty string or already 'N/A' - convert to 'N/A' for required, null for optional
+        if (trimmed === '' || trimmed.toLowerCase() === 'n/a' || trimmed === 'null') {
+          return isRequired ? 'N/A' : null;
+        }
+        
+        // PRESERVE ACTUAL DATA - return as-is if it has content
+        return trimmed;
+      };
+
+      // Extract and normalize values - preserve actual data, convert empty to null (model will convert to 'N/A')
+      // Required fields (NOT NULL in DB): phone, gst_no, customer (for DB constraint)
+      // Logic: If field has data → save actual data, If field is empty → model will save 'N/A' to DB
+      const customerType = normalizeField(ui.customer_type || ui.customerType);
+      const phone = normalizeField(ui.phone, true); // Required field - NOT NULL
+      
+      // Check for duplicate lead by phone number
+      const cleanedPhone = phone.replace(/\D/g, '').slice(-10);
+      const { query } = require('../config/database');
+      const duplicateCheck = await query(
+        `SELECT id, customer, business, assigned_salesperson 
+         FROM department_head_leads 
+         WHERE created_by = $1 AND phone = $2 
+         LIMIT 1`,
+        [createdBy, cleanedPhone]
+      );
+      
+      if (duplicateCheck.rows && duplicateCheck.rows.length > 0) {
+        const duplicate = duplicateCheck.rows[0];
+        return res.status(409).json({ 
+          success: false, 
+          message: 'Duplicate lead found',
+          isDuplicate: true,
+          duplicateLead: {
+            id: duplicate.id,
+            business: duplicate.business || 'N/A',
+            assignedSalesperson: duplicate.assigned_salesperson || null
+          }
+        });
+      }
+
       const dhUi = {
-        customerId: ui.customerId || null,
-        customer: ui.name || ui.customer || null,
-        email: ui.email || null,
-        business: ui.business || null,
-        leadSource: ui.lead_source || ui.leadSource || null,
-        productNames: ui.product_type || ui.productNames || null,
-        // Map customer_type to category if category is not provided
-        category: ui.category || customerType || null,
-        salesStatus: ui.sales_status || null,
-        phone: ui.phone || null,
-        address: ui.address || null,
-        gstNo: ui.gst_no || ui.gstNo || null,
-        state: ui.state || null,
-        customerType: customerType,
-        date: ui.date || null,
-        whatsapp: ui.whatsapp || null,
-        assignedSalesperson: username || ui.assignedSalesperson || null,
-        assignedTelecaller: ui.assignedTelecaller || null,
+        customerId: normalizeField(ui.customerId),
+        customer: normalizeField(ui.name || ui.customer) || 'N/A', // Defaults to 'N/A' if empty (DB constraint)
+        email: normalizeField(ui.email), // Will be converted to 'N/A' in model if null
+        business: normalizeField(ui.business), // Will be converted to 'N/A' in model if null
+        leadSource: normalizeField(ui.lead_source || ui.leadSource), // Will be converted to 'N/A' in model if null
+        productNames: normalizeField(ui.product_type || ui.productNames), // Will be converted to 'N/A' in model if null
+        // Only use category if explicitly provided - no auto-assignment from customerType
+        category: normalizeField(ui.category), // Will be converted to 'N/A' in model if null
+        salesStatus: normalizeField(ui.sales_status), // Will be converted to 'N/A' in model if null
+        phone: phone, // Required field - NOT NULL
+        address: normalizeField(ui.address), // Will be converted to 'N/A' in model if null
+        gstNo: normalizeField(ui.gst_no || ui.gstNo, true), // Required for DB constraint (NOT NULL)
+        state: normalizeField(ui.state), // Will be converted to 'N/A' in model if null
+        customerType: customerType, // Will be converted to 'N/A' in model if null
+        date: normalizeField(ui.date),
+        whatsapp: normalizeField(ui.whatsapp),
+        assignedSalesperson: normalizeField(username || ui.assignedSalesperson), // Will be converted to 'N/A' in model if null
+        assignedTelecaller: normalizeField(ui.assignedTelecaller), // Will be converted to 'N/A' in model if null
       };
 
       const created = await DepartmentHeadLead.createFromUi(dhUi, createdBy);
@@ -143,7 +268,7 @@ class SalespersonLeadController {
         return name.length > 0 || phone.length > 0;
       });
 
-      // Normalize to DH UI rows
+      // Normalize to DH UI rows - only import data from CSV headers, no auto-assignment
       const rows = leads.map((l) => {
         const customerType = l.customer_type || l.customerType || null;
         return {
@@ -153,8 +278,8 @@ class SalespersonLeadController {
           business: l.business || null,
           leadSource: l.lead_source || l.leadSource || null,
           productNames: l.product_type || l.productNames || null,
-          // Map customer_type to category if category is not provided
-          category: l.category || customerType || null,
+          // Only use category if explicitly provided in CSV - no auto-assignment from customerType
+          category: l.category || null,
           salesStatus: l.sales_status || null,
           phone: l.phone || null,
           address: l.address || null,
@@ -169,48 +294,59 @@ class SalespersonLeadController {
       });
 
       const result = await DepartmentHeadLead.bulkCreateFromUi(rows, createdBy);
-      // Sync each created id and create meetings
+      // Sync each created id and create meetings - skip errors and continue
       if (result?.rows?.length) {
         const MarketingMeeting = require('../models/MarketingMeeting');
         for (const r of result.rows) {
           if (r.id) {
-            await leadAssignmentService.syncSalespersonLead(r.id);
-            
-            // Create meeting for imported lead if assigned to salesperson
-            if (r.assigned_salesperson || username) {
-              try {
-                const meetingDate = r.date || new Date().toISOString().split('T')[0];
-                const leadAddress = r.address || 'Address not provided';
-                const meeting_id = await MarketingMeeting.generateMeetingId();
-                
-                await MarketingMeeting.create({
-                  meeting_id,
-                  customer_id: r.id,
-                  lead_id: r.id,
-                  customer_name: r.customer || r.name || 'N/A',
-                  customer_phone: r.phone || null,
-                  customer_email: r.email || null,
-                  address: leadAddress,
-                  city: r.city || null,
-                  state: r.state || null,
-                  pincode: r.pincode || null,
-                  assigned_to: r.assigned_salesperson || username,
-                  assigned_by: createdBy,
-                  meeting_date: meetingDate,
-                  meeting_time: null,
-                  scheduled_date: meetingDate,
-                  status: 'Scheduled',
-                  notes: `Imported by salesperson: ${username}`
-                });
-              } catch (meetingError) {
-                console.error(`Error creating meeting for imported lead ${r.id}:`, meetingError);
-                // Don't block import if meeting creation fails
+            try {
+              await leadAssignmentService.syncSalespersonLead(r.id);
+              
+              // Create meeting for imported lead if assigned to salesperson
+              if (r.assigned_salesperson || username) {
+                try {
+                  const meetingDate = r.date || new Date().toISOString().split('T')[0];
+                  const leadAddress = r.address || 'Address not provided';
+                  const meeting_id = await MarketingMeeting.generateMeetingId();
+                  
+                  await MarketingMeeting.create({
+                    meeting_id,
+                    customer_id: r.id,
+                    lead_id: r.id,
+                    customer_name: r.customer || r.name || 'N/A',
+                    customer_phone: r.phone || null,
+                    customer_email: r.email || null,
+                    address: leadAddress,
+                    city: r.city || null,
+                    state: r.state || null,
+                    pincode: r.pincode || null,
+                    assigned_to: r.assigned_salesperson || username,
+                    assigned_by: createdBy,
+                    meeting_date: meetingDate,
+                    meeting_time: null,
+                    scheduled_date: meetingDate,
+                    status: 'Scheduled',
+                    notes: `Imported by salesperson: ${username}`
+                  });
+                } catch (meetingError) {
+                  console.error(`Error creating meeting for imported lead ${r.id}:`, meetingError);
+                  // Don't block import if meeting creation fails
+                }
               }
+            } catch (syncError) {
+              console.error(`Error syncing lead ${r.id} to salesperson_leads:`, syncError.message);
+              // Continue with next lead
             }
           }
         }
       }
-      return res.json({ success: true, created: result?.rowCount || result?.rows?.length || 0, duplicatesCount: result?.duplicatesCount || 0 });
+      return res.json({ 
+        success: true, 
+        created: result?.rowCount || result?.rows?.length || 0, 
+        duplicatesCount: result?.duplicatesCount || 0,
+        skippedCount: result?.skippedRows?.length || 0,
+        skippedRows: result?.skippedRows || []
+      });
     } catch (error) {
       console.error('Error importing salesperson leads:', error);
       return res.status(500).json({ success: false, message: 'Failed to import leads', error: error.message });

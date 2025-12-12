@@ -22,14 +22,16 @@ class Quotation extends BaseModel {
           customer_address, customer_gst_no, customer_state,
           quotation_date, valid_until, branch,
           subtotal, tax_rate, tax_amount, discount_rate, discount_amount, total_amount,
-          template
+          template, payment_mode, transport_tc, dispatch_through, delivery_terms, material_type,
+          bank_details, terms_sections, bill_to
         ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+          $22, $23, $24, $25, $26, $27, $28, $29, $30
         ) RETURNING *
       `;
       
-      console.log('Creating quotation with data:', quotationData);
-      console.log('Items to save:', items);
+      console.log('💾 Creating quotation with data:', quotationData);
+      console.log('📦 Items to save:', items);
       
       const quotationValues = [
         quotationNumber,
@@ -53,8 +55,19 @@ class Quotation extends BaseModel {
         quotationData.discountRate || 0,
         quotationData.discountAmount || 0,
         quotationData.totalAmount,
-        quotationData.template || 'template1'
+        // New fields
+        quotationData.template || null,
+        quotationData.paymentMode || null,
+        quotationData.transportTc || null,
+        quotationData.dispatchThrough || null,
+        quotationData.deliveryTerms || null,
+        quotationData.materialType || null,
+        quotationData.bankDetails ? JSON.stringify(quotationData.bankDetails) : null,
+        quotationData.termsSections ? JSON.stringify(quotationData.termsSections) : null,
+        quotationData.billTo ? JSON.stringify(quotationData.billTo) : null
       ];
+      
+      console.log('📤 Quotation values:', quotationValues);
       
       const quotationResult = await query(quotationQuery, quotationValues);
       const quotation = quotationResult.rows[0];
@@ -407,12 +420,10 @@ class Quotation extends BaseModel {
     return await query(queryText, [quotationId]);
   }
 
-  // Get complete quotation data (quotation + items + approval logs + sent logs + PIs + payments)
   async getCompleteData(quotationId) {
     const quotation = await this.getWithItems(quotationId);
     if (!quotation) return null;
     
-    // Get approval logs (rows array)
     const approvalLogsRes = await query(
       'SELECT * FROM quotation_approval_logs WHERE quotation_id = $1 ORDER BY created_at ASC',
       [quotationId]

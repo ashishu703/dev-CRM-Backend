@@ -33,7 +33,7 @@ const login = async (req, res) => {
         username: 'Abhay Kumar',
         role: 'sales_head',
         departmentType: 'sales',
-        companyName: 'Anode Electric Pvt. Ltd.',
+        companyName: 'Demo Company',
         createdAt: new Date().toISOString(),
         lastLogin: new Date().toISOString()
       };
@@ -119,7 +119,7 @@ const getProfile = async (req, res) => {
         username: 'Abhay Kumar',
         role: 'sales_head',
         departmentType: 'sales',
-        companyName: 'Anode Electric Pvt. Ltd.',
+        companyName: 'Demo Company',
         phone: '+91 98765 43210',
         whatsapp: '+91 98765 43210',
         state: 'Maharashtra',

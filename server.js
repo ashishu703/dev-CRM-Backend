@@ -3,6 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const compression = require('./middleware/compression');
+const { cacheMiddleware } = require('./middleware/cache');
 require('dotenv').config();
 
 const logger = require('./utils/logger');
@@ -25,6 +27,8 @@ const securityLogRoutes = require('./routes/securityLogs');
 const stockRoutes = require('./routes/stock');
 const workOrderRoutes = require('./routes/workOrders');
 const marketingRoutes = require('./routes/marketing');
+const organizationRoutes = require('./routes/organizations');
+const tradeIndiaRoutes = require('./routes/tradeIndia');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -74,9 +78,17 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+// OPTIMIZED: Response compression (reduces payload size by 70-90%)
+app.use(compression);
+
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// OPTIMIZED: Cache middleware for GET requests (reduces DB load)
+app.use('/api/leads', cacheMiddleware(300)); // 5 minute cache
+app.use('/api/quotations', cacheMiddleware(180)); // 3 minute cache
+app.use('/api/proforma-invoices', cacheMiddleware(180)); // 3 minute cache
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -125,6 +137,8 @@ app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/work-orders', workOrderRoutes);
 app.use('/api/marketing', marketingRoutes);
+app.use('/api/organizations', organizationRoutes);
+app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler
@@ -137,6 +151,12 @@ app.use('*', (req, res) => {
 
 // Error handling middleware
 app.use(errorHandler);
+
+// Initialize TradeIndia cron service (if enabled)
+if (process.env.TRADEINDIA_CRON_ENABLED === 'true') {
+  const tradeIndiaCronService = require('./services/tradeIndiaCronService');
+  logger.info('TradeIndia cron service initialized');
+}
 
 // Start server
 app.listen(PORT, () => {
