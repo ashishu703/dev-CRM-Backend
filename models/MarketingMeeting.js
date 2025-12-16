@@ -85,6 +85,16 @@ class MarketingMeeting extends BaseModel {
       values.push(filters.meeting_date);
     }
 
+    if (filters.lead_id) {
+      conditions.push(`(mm.lead_id = $${paramCount++} OR mm.customer_id = $${paramCount - 1})`);
+      values.push(filters.lead_id);
+    }
+
+    if (filters.customer_id) {
+      conditions.push(`(mm.customer_id = $${paramCount++} OR mm.lead_id = $${paramCount - 1})`);
+      values.push(filters.customer_id);
+    }
+
     if (filters.start_date && filters.end_date) {
       conditions.push(`mm.meeting_date BETWEEN $${paramCount++} AND $${paramCount++}`);
       values.push(filters.start_date, filters.end_date);
@@ -102,10 +112,14 @@ class MarketingMeeting extends BaseModel {
         CASE 
           WHEN EXISTS (
             SELECT 1 FROM marketing_check_ins mci 
-            WHERE mci.meeting_id = mm.id
+            WHERE mci.meeting_id = mm.id AND mci.status != 'Rejected'
           ) THEN true
           ELSE false
-        END as has_checkin
+        END as has_checkin,
+        (SELECT status FROM marketing_check_ins WHERE meeting_id = mm.id ORDER BY check_in_time DESC LIMIT 1) as checkin_status,
+        (SELECT photo_url FROM marketing_check_ins WHERE meeting_id = mm.id ORDER BY check_in_time DESC LIMIT 1) as checkin_photo_url,
+        (SELECT latitude FROM marketing_check_ins WHERE meeting_id = mm.id ORDER BY check_in_time DESC LIMIT 1) as checkin_latitude,
+        (SELECT longitude FROM marketing_check_ins WHERE meeting_id = mm.id ORDER BY check_in_time DESC LIMIT 1) as checkin_longitude
       FROM marketing_meetings mm
       LEFT JOIN department_head_leads dhl ON (
         (mm.lead_id IS NOT NULL AND dhl.id = mm.lead_id)
@@ -144,7 +158,7 @@ class MarketingMeeting extends BaseModel {
     // Use case-insensitive matching to handle email/username variations
     // Match by both email and username by checking department_users table
     // Join with department_head_leads to get additional lead details
-    // Only return meetings where the lead still exists in department_head_leads
+    // Return ALL meetings assigned to this salesperson, regardless of lead existence
     const sqlQuery = `
       SELECT 
         mm.*,
@@ -160,10 +174,11 @@ class MarketingMeeting extends BaseModel {
         CASE 
           WHEN EXISTS (
             SELECT 1 FROM marketing_check_ins mci 
-            WHERE mci.meeting_id = mm.id
+            WHERE mci.meeting_id = mm.id AND mci.status != 'Rejected'
           ) THEN true
           ELSE false
-        END as has_checkin
+        END as has_checkin,
+        (SELECT status FROM marketing_check_ins WHERE meeting_id = mm.id ORDER BY check_in_time DESC LIMIT 1) as checkin_status
       FROM marketing_meetings mm
       LEFT JOIN department_head_leads dhl ON (
         (mm.lead_id IS NOT NULL AND dhl.id::text = mm.lead_id::text)
@@ -172,11 +187,25 @@ class MarketingMeeting extends BaseModel {
         OR (mm.customer_id IS NOT NULL AND dhl.id = mm.customer_id::integer)
       )
       WHERE (
-        LOWER(mm.assigned_to) = LOWER($1)
+        -- Direct match (case-insensitive)
+        LOWER(TRIM(mm.assigned_to)) = LOWER(TRIM($1))
+        -- Partial match (handles cases where assigned_to might have extra characters)
+        OR LOWER(TRIM(mm.assigned_to)) LIKE LOWER(TRIM($1) || '%')
+        OR LOWER(TRIM($1)) LIKE LOWER(TRIM(mm.assigned_to) || '%')
+        -- Match through department_users table
         OR EXISTS (
           SELECT 1 FROM department_users du
-          WHERE (LOWER(du.email) = LOWER($1) OR LOWER(du.username) = LOWER($1))
-            AND (LOWER(du.email) = LOWER(mm.assigned_to) OR LOWER(du.username) = LOWER(mm.assigned_to))
+          WHERE (
+            (LOWER(TRIM(du.email)) = LOWER(TRIM($1)) OR LOWER(TRIM(du.username)) = LOWER(TRIM($1)))
+            AND (
+              LOWER(TRIM(du.email)) = LOWER(TRIM(mm.assigned_to)) 
+              OR LOWER(TRIM(du.username)) = LOWER(TRIM(mm.assigned_to))
+              OR LOWER(TRIM(du.email)) LIKE LOWER(TRIM(mm.assigned_to) || '%')
+              OR LOWER(TRIM(du.username)) LIKE LOWER(TRIM(mm.assigned_to) || '%')
+              OR LOWER(TRIM(mm.assigned_to)) LIKE LOWER(TRIM(du.email) || '%')
+              OR LOWER(TRIM(mm.assigned_to)) LIKE LOWER(TRIM(du.username) || '%')
+            )
+          )
         )
       )
       ORDER BY mm.meeting_date ASC, mm.meeting_time ASC
@@ -355,10 +384,24 @@ class MarketingMeeting extends BaseModel {
       RETURNING *
     `;
 
+    console.log('Updating meeting:', {
+      id,
+      updateData,
+      sqlQuery: sqlQuery.replace(/\$\d+/g, '?'),
+      values
+    });
+
     const result = await query(sqlQuery, values);
     if (result.rows.length === 0) {
+      console.error('Meeting not found for update:', id);
       throw new Error('Meeting not found');
     }
+
+    console.log('Meeting updated successfully:', {
+      id: result.rows[0].id,
+      status: result.rows[0].status,
+      updated_at: result.rows[0].updated_at
+    });
 
     return result.rows[0];
   }
@@ -400,7 +443,7 @@ class MarketingMeeting extends BaseModel {
   }
 
   /**
-   * Generate unique meeting ID
+   * Generate unique meeting ID with retry logic to handle duplicates
    * @returns {Promise<string>} Unique meeting ID
    */
   async generateMeetingId() {
@@ -408,17 +451,42 @@ class MarketingMeeting extends BaseModel {
     const date = new Date();
     const year = date.getFullYear().toString().slice(-2);
     const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
     
-    // Get count of meetings today
-    const today = date.toISOString().split('T')[0];
-    const countQuery = `
-      SELECT COUNT(*) as count FROM marketing_meetings
-      WHERE DATE(created_at) = $1
-    `;
-    const countResult = await query(countQuery, [today]);
-    const count = parseInt(countResult.rows[0].count) + 1;
+    // Use timestamp-based approach with random component to ensure uniqueness
+    // This prevents race conditions when multiple meetings are created simultaneously
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
     
-    return `${prefix}-${year}${month}${String(count).padStart(4, '0')}`;
+    // Base ID: MTG-YYMMDD-TIMESTAMP-RANDOM
+    let meetingId = `${prefix}-${year}${month}${day}-${timestamp}-${random}`;
+    
+    // Check if this ID already exists (very unlikely but check anyway)
+    let attempts = 0;
+    const maxAttempts = 5;
+    
+    while (attempts < maxAttempts) {
+      const checkQuery = `
+        SELECT id FROM marketing_meetings WHERE meeting_id = $1 LIMIT 1
+      `;
+      const checkResult = await query(checkQuery, [meetingId]);
+      
+      if (checkResult.rows.length === 0) {
+        // ID is unique, return it
+        return meetingId;
+      }
+      
+      // If ID exists, generate a new one with updated timestamp and random
+      attempts++;
+      const newTimestamp = Date.now();
+      const newRandom = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      meetingId = `${prefix}-${year}${month}${day}-${newTimestamp}-${newRandom}`;
+    }
+    
+    // Fallback: if all attempts failed (extremely unlikely), use UUID-like format
+    const crypto = require('crypto');
+    const uuid = crypto.randomUUID().substring(0, 8).toUpperCase();
+    return `${prefix}-${year}${month}${day}-${uuid}`;
   }
 }
 

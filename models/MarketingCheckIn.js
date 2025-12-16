@@ -7,6 +7,25 @@ class MarketingCheckIn extends BaseModel {
   }
 
   /**
+   * Check if is_deleted column exists in department_head_leads table
+   * @returns {Promise<boolean>}
+   */
+  async hasIsDeletedColumn() {
+    try {
+      const columnCheckQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'department_head_leads' 
+        AND column_name = 'is_deleted'
+      `;
+      const columnCheck = await query(columnCheckQuery);
+      return columnCheck.rows.length > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
    * Create a new check-in
    * @param {Object} checkInData - Check-in data
    * @returns {Promise<Object>} Created check-in
@@ -50,7 +69,22 @@ class MarketingCheckIn extends BaseModel {
       checkInData.photo_source || 'camera'
     ];
 
+    console.log('Creating check-in record:', {
+      meeting_id,
+      salesperson_email,
+      photo_url: photo_url ? 'present' : 'missing',
+      latitude,
+      longitude
+    });
+
     const result = await query(sqlQuery, values);
+    
+    console.log('Check-in record created successfully:', {
+      check_in_id: result.rows[0].id,
+      meeting_id: result.rows[0].meeting_id,
+      status: result.rows[0].status
+    });
+
     return result.rows[0];
   }
 
@@ -86,20 +120,172 @@ class MarketingCheckIn extends BaseModel {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const sqlQuery = `
+    // Check if is_deleted column exists
+    const hasIsDeletedColumn = await this.hasIsDeletedColumn();
+
+    // Build query based on whether column exists
+    let sqlQuery;
+    if (hasIsDeletedColumn) {
+      sqlQuery = `
+        SELECT 
+          ci.id,
+          ci.meeting_id,
+          ci.salesperson_id,
+          ci.salesperson_email,
+          ci.salesperson_name,
+          ci.photo_url,
+          ci.latitude,
+          ci.longitude,
+          ci.address,
+          ci.city,
+          ci.state,
+          ci.pincode,
+          ci.check_in_time,
+          ci.status,
+          ci.notes,
+          ci.distance_from_meeting,
+          ci.location_validated,
+          ci.validation_message,
+          ci.photo_taken_at,
+          ci.photo_source,
+          ci.created_at,
+          m.meeting_id as meeting_identifier,
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
+          m.customer_phone,
+          m.customer_email,
+          m.address as meeting_address,
+          m.city as meeting_city,
+          m.state as meeting_state,
+          m.lead_id,
+          m.customer_id,
+          COALESCE(dhl.is_deleted, FALSE) as lead_is_deleted,
+          dhl.deleted_at as lead_deleted_at
+        FROM marketing_check_ins ci
+        LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+        LEFT JOIN department_head_leads dhl ON (
+          (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+          OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+          OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+          OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+        )
+        ${whereClause}
+        ORDER BY ci.check_in_time DESC
+      `;
+    } else {
+      sqlQuery = `
       SELECT 
-        ci.*,
+          ci.id,
+          ci.meeting_id,
+          ci.salesperson_id,
+          ci.salesperson_email,
+          ci.salesperson_name,
+          ci.photo_url,
+          ci.latitude,
+          ci.longitude,
+          ci.address,
+          ci.city,
+          ci.state,
+          ci.pincode,
+          ci.check_in_time,
+          ci.status,
+          ci.notes,
+          ci.distance_from_meeting,
+          ci.location_validated,
+          ci.validation_message,
+          ci.photo_taken_at,
+          ci.photo_source,
+          ci.created_at,
         m.meeting_id as meeting_identifier,
-        m.customer_name,
-        m.address as meeting_address
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
+          m.customer_phone,
+          m.customer_email,
+          m.address as meeting_address,
+          m.city as meeting_city,
+          m.state as meeting_state,
+          m.lead_id,
+          m.customer_id,
+          FALSE as lead_is_deleted,
+          NULL as lead_deleted_at
       FROM marketing_check_ins ci
       LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+        LEFT JOIN department_head_leads dhl ON (
+          (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+          OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+          OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+          OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+        )
       ${whereClause}
       ORDER BY ci.check_in_time DESC
     `;
+    }
 
+    console.log('Fetching all check-ins with query:', sqlQuery.replace(/\$\d+/g, '?'));
+    console.log('Query values:', values);
+
+    try {
     const result = await query(sqlQuery, values);
+      
+      console.log('=== DATABASE QUERY RESULT ===');
+      console.log('Found check-ins:', result.rows.length);
+      console.log('Query executed successfully');
+      
+      if (result.rows.length > 0) {
+        console.log('Sample check-in data (first record):', {
+          id: result.rows[0].id,
+          meeting_id: result.rows[0].meeting_id,
+          photo_url: result.rows[0].photo_url ? (result.rows[0].photo_url.substring(0, 80) + '...') : 'MISSING - THIS IS A PROBLEM!',
+          latitude: result.rows[0].latitude,
+          longitude: result.rows[0].longitude,
+          customer_name: result.rows[0].customer_name || 'NULL',
+          salesperson_email: result.rows[0].salesperson_email,
+          check_in_time: result.rows[0].check_in_time,
+          status: result.rows[0].status
+        });
+        
+        // Verify all required fields are present
+        const hasPhoto = !!result.rows[0].photo_url;
+        const hasLocation = !!(result.rows[0].latitude && result.rows[0].longitude);
+        console.log('Data validation:', {
+          has_photo: hasPhoto,
+          has_location: hasLocation,
+          has_customer_name: !!result.rows[0].customer_name
+        });
+      } else {
+        console.log('⚠️ NO CHECK-INS FOUND IN DATABASE');
+        console.log('This could mean:');
+        console.log('1. No check-ins have been created yet');
+        console.log('2. Check-ins exist but query filters are excluding them');
+        console.log('3. Database connection issue');
+      }
+
     return result.rows;
+    } catch (dbError) {
+      console.error('=== DATABASE QUERY ERROR ===');
+      console.error('Error executing query:', dbError.message);
+      console.error('SQL Query:', sqlQuery);
+      console.error('Query values:', values);
+      throw dbError;
+    }
   }
 
   /**
@@ -108,17 +294,74 @@ class MarketingCheckIn extends BaseModel {
    * @returns {Promise<Array>} Array of check-ins
    */
   async getByMeetingId(meetingId) {
-    const sqlQuery = `
+    const hasIsDeletedColumn = await this.hasIsDeletedColumn();
+
+    let sqlQuery;
+    if (hasIsDeletedColumn) {
+      sqlQuery = `
       SELECT 
         ci.*,
         m.meeting_id as meeting_identifier,
-        m.customer_name,
-        m.address as meeting_address
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
+          m.address as meeting_address,
+          m.lead_id,
+          m.customer_id,
+          COALESCE(dhl.is_deleted, FALSE) as lead_is_deleted,
+          dhl.deleted_at as lead_deleted_at
       FROM marketing_check_ins ci
       LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+      LEFT JOIN department_head_leads dhl ON (
+        (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+        OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+        OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+        OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+      )
       WHERE ci.meeting_id = $1
       ORDER BY ci.check_in_time DESC
     `;
+    } else {
+      sqlQuery = `
+        SELECT 
+          ci.*,
+          m.meeting_id as meeting_identifier,
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
+          m.address as meeting_address,
+          m.lead_id,
+          m.customer_id,
+          FALSE as lead_is_deleted,
+          NULL as lead_deleted_at
+        FROM marketing_check_ins ci
+        LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+        LEFT JOIN department_head_leads dhl ON (
+          (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+          OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+          OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+          OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+        )
+        WHERE ci.meeting_id = $1
+        ORDER BY ci.check_in_time DESC
+      `;
+    }
 
     const result = await query(sqlQuery, [meetingId]);
     return result.rows;
@@ -130,19 +373,80 @@ class MarketingCheckIn extends BaseModel {
    * @returns {Promise<Array>} Array of check-ins
    */
   async getBySalesperson(salespersonEmail) {
-    const sqlQuery = `
+    const hasIsDeletedColumn = await this.hasIsDeletedColumn();
+
+    // Build query based on whether column exists
+    let sqlQuery;
+    if (hasIsDeletedColumn) {
+      sqlQuery = `
+        SELECT 
+          ci.*,
+          m.meeting_id as meeting_identifier,
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
+          m.address as meeting_address,
+          m.meeting_date,
+          m.meeting_time,
+          m.lead_id,
+          m.customer_id,
+          COALESCE(dhl.is_deleted, FALSE) as lead_is_deleted,
+          dhl.deleted_at as lead_deleted_at
+        FROM marketing_check_ins ci
+        LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+        LEFT JOIN department_head_leads dhl ON (
+          (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+          OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+          OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+          OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+        )
+        WHERE ci.salesperson_email = $1
+        ORDER BY ci.check_in_time DESC
+      `;
+    } else {
+      // Fallback query when is_deleted column doesn't exist yet
+      sqlQuery = `
       SELECT 
         ci.*,
         m.meeting_id as meeting_identifier,
-        m.customer_name,
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
         m.address as meeting_address,
         m.meeting_date,
-        m.meeting_time
+          m.meeting_time,
+          m.lead_id,
+          m.customer_id,
+          FALSE as lead_is_deleted,
+          NULL as lead_deleted_at
       FROM marketing_check_ins ci
       LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+        LEFT JOIN department_head_leads dhl ON (
+          (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+          OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+          OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+          OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+        )
       WHERE ci.salesperson_email = $1
       ORDER BY ci.check_in_time DESC
     `;
+    }
 
     const result = await query(sqlQuery, [salespersonEmail]);
     return result.rows;
@@ -154,18 +458,76 @@ class MarketingCheckIn extends BaseModel {
    * @returns {Promise<Object|null>} Check-in or null
    */
   async getById(id) {
-    const sqlQuery = `
+    const hasIsDeletedColumn = await this.hasIsDeletedColumn();
+
+    let sqlQuery;
+    if (hasIsDeletedColumn) {
+      sqlQuery = `
+        SELECT 
+          ci.*,
+          m.meeting_id as meeting_identifier,
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
+          m.address as meeting_address,
+          m.meeting_date,
+          m.meeting_time,
+          m.lead_id,
+          m.customer_id,
+          COALESCE(dhl.is_deleted, FALSE) as lead_is_deleted,
+          dhl.deleted_at as lead_deleted_at
+      FROM marketing_check_ins ci
+      LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+      LEFT JOIN department_head_leads dhl ON (
+        (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+        OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+        OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+        OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+      )
+      WHERE ci.id = $1
+    `;
+    } else {
+      sqlQuery = `
       SELECT 
         ci.*,
         m.meeting_id as meeting_identifier,
-        m.customer_name,
+          CASE 
+            WHEN m.customer_name IS NOT NULL 
+              AND m.customer_name != '' 
+              AND LOWER(TRIM(m.customer_name)) NOT IN ('n/a', 'na', 'null')
+            THEN m.customer_name
+            WHEN dhl.customer IS NOT NULL 
+              AND dhl.customer != '' 
+              AND LOWER(TRIM(dhl.customer)) NOT IN ('n/a', 'na', 'null')
+            THEN dhl.customer
+            ELSE 'Meeting'
+          END as customer_name,
         m.address as meeting_address,
         m.meeting_date,
-        m.meeting_time
+          m.meeting_time,
+          m.lead_id,
+          m.customer_id,
+          FALSE as lead_is_deleted,
+          NULL as lead_deleted_at
       FROM marketing_check_ins ci
       LEFT JOIN marketing_meetings m ON ci.meeting_id = m.id
+      LEFT JOIN department_head_leads dhl ON (
+        (m.lead_id IS NOT NULL AND dhl.id::text = m.lead_id::text)
+        OR (m.customer_id IS NOT NULL AND dhl.id::text = m.customer_id::text)
+        OR (m.lead_id IS NOT NULL AND dhl.id = m.lead_id::integer)
+        OR (m.customer_id IS NOT NULL AND dhl.id = m.customer_id::integer)
+      )
       WHERE ci.id = $1
     `;
+    }
 
     const result = await query(sqlQuery, [id]);
     return result.rows.length > 0 ? result.rows[0] : null;

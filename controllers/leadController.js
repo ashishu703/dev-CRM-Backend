@@ -263,7 +263,7 @@ class LeadController {
     }
   }
 
-  // Delete lead
+  // Delete lead (soft delete - marks as deleted but keeps in database for calendar)
   async delete(req, res) {
     try {
       const { id } = req.params;
@@ -273,36 +273,39 @@ class LeadController {
       try {
         await client.query('BEGIN');
 
-        // First, delete marketing check-ins associated with meetings for this lead
-        await client.query(
-          `DELETE FROM marketing_check_ins 
-           WHERE meeting_id IN (
-             SELECT id FROM marketing_meetings 
-             WHERE lead_id = $1 OR customer_id = $1
-           )`,
-          [id]
-        );
-
-        // Delete marketing meetings associated with this lead
-        await client.query(
-          'DELETE FROM marketing_meetings WHERE lead_id = $1 OR customer_id = $1',
-          [id]
-        );
-
-        // Delete from salesperson_leads if it exists (cascade delete)
-        await client.query(
-          'DELETE FROM salesperson_leads WHERE dh_lead_id = $1',
-          [id]
-        );
-
-        // Delete from department_head_leads
+        // Soft delete: Mark lead as deleted instead of actually deleting it
+        // This allows check-ins to still reference the lead in the calendar
         const dhResult = await client.query(
-          'DELETE FROM department_head_leads WHERE id = $1',
+          `UPDATE department_head_leads 
+           SET is_deleted = TRUE, deleted_at = NOW() 
+           WHERE id = $1`,
           [id]
         );
 
-        // Also delete from main leads table if it exists
-        const leadResult = await Lead.delete(id);
+        // Also soft delete from main leads table if it exists
+        let leadResult = { rowCount: 0 };
+        try {
+          leadResult = await client.query(
+            `UPDATE leads 
+             SET is_deleted = TRUE, deleted_at = NOW() 
+             WHERE id = $1`,
+          [id]
+        );
+        } catch (e) {
+          // Leads table might not exist or might not have is_deleted column
+          console.log('Could not soft delete from leads table:', e.message);
+        }
+
+        // Soft delete associated salesperson_leads
+        await client.query(
+          `UPDATE salesperson_leads 
+           SET is_deleted = TRUE, deleted_at = NOW() 
+           WHERE dh_lead_id = $1`,
+          [id]
+        );
+
+        // Note: We do NOT delete marketing_check_ins or marketing_meetings
+        // These should remain so they can be displayed in the calendar with a "deleted" mark
 
         await client.query('COMMIT');
 
@@ -405,10 +408,49 @@ class LeadController {
       // Import into department_head_leads for DH workflow
       const result = await DepartmentHeadLead.bulkCreateFromUi(sanitizedLeads, req.user.email);
 
-      // Sync salesperson leads for all inserted rows, if any assignments exist
+      // Sync salesperson leads and create meetings for all inserted rows, if any assignments exist
       if (result && result.rows && result.rows.length) {
+        const MarketingMeeting = require('../models/MarketingMeeting');
         for (const row of result.rows) {
+          try {
           await leadAssignmentService.syncSalespersonLead(row.id);
+            
+            // Create meeting for imported lead if assigned to a salesperson
+            if (row.assigned_salesperson || row.assignedSalesperson) {
+              try {
+                const assignedSalesperson = row.assigned_salesperson || row.assignedSalesperson;
+                const meetingDate = row.date || new Date().toISOString().split('T')[0];
+                const leadAddress = row.address || 'Address not provided';
+                const meeting_id = await MarketingMeeting.generateMeetingId();
+                
+                await MarketingMeeting.create({
+                  meeting_id,
+                  customer_id: row.id,
+                  lead_id: row.id,
+                  customer_name: row.customer || row.customer_name || row.name || 'N/A',
+                  customer_phone: row.phone || null,
+                  customer_email: row.email || null,
+                  address: leadAddress,
+                  city: row.city || null,
+                  state: row.state || null,
+                  pincode: row.pincode || null,
+                  assigned_to: assignedSalesperson,
+                  assigned_by: req.user.email || req.user.username || 'unknown',
+                  meeting_date: meetingDate,
+                  meeting_time: null,
+                  scheduled_date: meetingDate,
+                  status: 'Scheduled',
+                  notes: `Imported and assigned from CSV`
+                });
+              } catch (meetingError) {
+                console.error(`Error creating meeting for imported lead ${row.id}:`, meetingError);
+                // Don't block import if meeting creation fails
+              }
+            }
+          } catch (syncError) {
+            console.error(`Error syncing lead ${row.id}:`, syncError);
+            // Continue with other leads even if one fails
+          }
         }
       }
 

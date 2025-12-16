@@ -44,14 +44,22 @@ class MarketingCheckInController {
         });
       }
 
-      // Verify meeting exists
+      // Verify meeting exists - meeting_id from frontend is the UUID (meeting.id)
       const meeting = await MarketingMeeting.getById(meeting_id);
       if (!meeting) {
+        logger.error('Meeting not found:', { meeting_id });
         return res.status(404).json({
           success: false,
           message: 'Meeting not found'
         });
       }
+      
+      logger.info('Meeting found for check-in:', {
+        meeting_id: meeting.id,
+        meeting_identifier: meeting.meeting_id,
+        customer_name: meeting.customer_name,
+        assigned_to: meeting.assigned_to
+      });
 
       // Get salesperson info from authenticated user
       const salespersonEmail = req.user?.email || req.user?.username;
@@ -64,6 +72,15 @@ class MarketingCheckInController {
           message: 'User authentication required'
         });
       }
+
+      // Log user info for debugging
+      logger.info('Check-in attempt:', {
+        meeting_id,
+        salesperson_email: salespersonEmail,
+        salesperson_username: req.user?.username,
+        user_id: salespersonId,
+        meeting_assigned_to: meeting.assigned_to
+      });
 
       // SECURITY VALIDATION 1: Check for duplicate check-ins
       const existingCheckIn = await MarketingCheckIn.findExistingCheckIn(meeting_id, salespersonEmail);
@@ -80,11 +97,25 @@ class MarketingCheckInController {
       }
 
       // SECURITY VALIDATION 2: Verify salesperson is assigned to this meeting
-      if (meeting.assigned_to !== salespersonEmail) {
-        return res.status(403).json({
-          success: false,
-          message: 'You are not assigned to this meeting. Only the assigned salesperson can check in.'
-        });
+      // Use case-insensitive comparison to handle email/username variations
+      const assignedToLower = (meeting.assigned_to || '').toLowerCase().trim();
+      const salespersonEmailLower = (salespersonEmail || '').toLowerCase().trim();
+      
+      if (assignedToLower !== salespersonEmailLower) {
+        // Also check if the user's username matches (in case assigned_to uses username)
+        const salespersonUsername = (req.user?.username || '').toLowerCase().trim();
+        if (assignedToLower !== salespersonUsername) {
+          logger.warn('Check-in authorization failed:', {
+            meeting_id,
+            assigned_to: meeting.assigned_to,
+            salesperson_email: salespersonEmail,
+            salesperson_username: req.user?.username
+          });
+          return res.status(403).json({
+            success: false,
+            message: 'You are not assigned to this meeting. Only the assigned salesperson can check in.'
+          });
+        }
       }
 
       // SECURITY VALIDATION 3: Time window validation (only allow check-in on scheduled date ± time window)
@@ -151,8 +182,19 @@ class MarketingCheckInController {
       // checkInTime already defined above for time window validation
 
       // Create check-in record with validation data
-      const checkIn = await MarketingCheckIn.create({
+      logger.info('Creating check-in record...', {
         meeting_id,
+        meeting_uuid: meeting.id,
+        meeting_status: meeting.status,
+        salesperson_email: salespersonEmail,
+        photo_url_present: !!photoUrl,
+        latitude: checkInLat,
+        longitude: checkInLon
+      });
+
+      // Ensure we're using the UUID (meeting.id) not the string identifier
+      const checkIn = await MarketingCheckIn.create({
+        meeting_id: meeting.id, // Use UUID, not string identifier
         salesperson_id: salespersonId,
         salesperson_email: salespersonEmail,
         salesperson_name: salespersonName,
@@ -173,21 +215,70 @@ class MarketingCheckInController {
         photo_source: req.body.photo_source || 'camera' // 'camera' or 'upload'
       });
 
-      // Update meeting status to 'Completed' if it was 'Scheduled' or 'In Progress'
-      if (meeting.status === 'Scheduled' || meeting.status === 'In Progress') {
-        await MarketingMeeting.update(meeting_id, { status: 'Completed' });
+      logger.info('Check-in record created successfully:', {
+        check_in_id: checkIn.id,
+        meeting_id: checkIn.meeting_id,
+        photo_url: checkIn.photo_url ? 'present' : 'MISSING',
+        latitude: checkIn.latitude,
+        longitude: checkIn.longitude
+      });
+
+      // Update meeting status to 'Completed' to reflect the check-in
+      // Always update status regardless of current status to ensure consistency
+      try {
+        const currentStatus = meeting.status;
+        logger.info('Updating meeting status...', {
+          meeting_id,
+          meeting_uuid: meeting.id,
+          current_status: currentStatus,
+          new_status: 'Completed'
+        });
+
+        // Use meeting.id (UUID) for update, not meeting_id (string identifier)
+        const updatedMeeting = await MarketingMeeting.update(meeting.id, { status: 'Completed' });
+        
+        logger.info('Meeting status updated successfully:', {
+          meeting_id,
+          meeting_uuid: meeting.id,
+          old_status: currentStatus,
+          new_status: updatedMeeting.status,
+          updated_meeting_id: updatedMeeting.id
+        });
+      } catch (updateError) {
+        logger.error('Error updating meeting status:', {
+          meeting_id,
+          meeting_uuid: meeting.id,
+          error: updateError.message,
+          stack: updateError.stack
+        });
+        // Don't fail the check-in if status update fails - log and continue
+        // But this is important, so we should still return success
       }
 
-      logger.info('Marketing check-in created:', {
+      // Fetch the updated meeting to include in response
+      let updatedMeeting = null;
+      try {
+        updatedMeeting = await MarketingMeeting.getById(meeting.id);
+      } catch (err) {
+        logger.warn('Could not fetch updated meeting:', err);
+      }
+
+      logger.info('Marketing check-in created and meeting updated:', {
         check_in_id: checkIn.id,
         meeting_id,
-        salesperson_email: salespersonEmail
+        meeting_uuid: meeting.id,
+        salesperson_email: salespersonEmail,
+        photo_url: photoUrl,
+        meeting_status: updatedMeeting?.status || meeting.status
       });
 
       res.status(201).json({
         success: true,
         message: 'Check-in submitted successfully',
-        data: checkIn
+        data: {
+          ...checkIn,
+          meeting: updatedMeeting || meeting
+        }
       });
     } catch (error) {
       logger.error('Error creating check-in:', error);
@@ -205,6 +296,12 @@ class MarketingCheckInController {
    */
   async getAll(req, res) {
     try {
+      logger.info('GET /api/marketing/check-ins called', {
+        user: req.user?.email || req.user?.username,
+        role: req.user?.role,
+        query: req.query
+      });
+
       const filters = {};
 
       // Optional query filters
@@ -221,15 +318,43 @@ class MarketingCheckInController {
         filters.end_date = req.query.end_date;
       }
 
+      logger.info('Fetching all check-ins with filters:', filters);
+
       const checkIns = await MarketingCheckIn.getAll(filters);
 
-      res.json({
-        success: true,
-        data: checkIns,
-        count: checkIns.length
+      logger.info('Retrieved check-ins from database:', {
+        count: checkIns.length,
+        sample: checkIns.length > 0 ? {
+          id: checkIns[0].id,
+          meeting_id: checkIns[0].meeting_id,
+          photo_url: checkIns[0].photo_url ? checkIns[0].photo_url.substring(0, 50) + '...' : 'MISSING',
+          latitude: checkIns[0].latitude,
+          longitude: checkIns[0].longitude,
+          customer_name: checkIns[0].customer_name,
+          salesperson_email: checkIns[0].salesperson_email
+        } : 'No check-ins found'
       });
+
+      // Ensure we return the data in the expected format
+      const response = {
+        success: true,
+        data: checkIns || [],
+        count: checkIns ? checkIns.length : 0
+      };
+
+      logger.info('Sending response:', {
+        success: response.success,
+        count: response.count,
+        has_data: Array.isArray(response.data) && response.data.length > 0
+      });
+
+      res.json(response);
     } catch (error) {
-      logger.error('Error fetching check-ins:', error);
+      logger.error('Error fetching check-ins:', {
+        error: error.message,
+        stack: error.stack,
+        user: req.user?.email || req.user?.username
+      });
       res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch check-ins',
@@ -340,13 +465,52 @@ class MarketingCheckInController {
         });
       }
 
+      // Get the check-in first to access meeting_id
+      const existingCheckIn = await MarketingCheckIn.getById(id);
+      if (!existingCheckIn) {
+        return res.status(404).json({
+          success: false,
+          message: 'Check-in not found'
+        });
+      }
+
       const updateData = {};
       if (status) updateData.status = status;
       if (notes !== undefined) updateData.notes = notes;
 
       const checkIn = await MarketingCheckIn.update(id, updateData);
 
-      logger.info('Check-in status updated:', { check_in_id: id, status });
+      logger.info('Check-in status updated:', { 
+        check_in_id: id, 
+        status,
+        meeting_id: existingCheckIn.meeting_id
+      });
+
+      // If check-in is rejected, update meeting status back to allow re-check-in
+      if (status === 'Rejected') {
+        try {
+          const meeting = await MarketingMeeting.getById(existingCheckIn.meeting_id);
+          if (meeting) {
+            // Change status back to 'Scheduled' or 'In Progress' to allow re-check-in
+            const newMeetingStatus = meeting.status === 'Completed' ? 'Scheduled' : meeting.status;
+            await MarketingMeeting.update(existingCheckIn.meeting_id, { 
+              status: newMeetingStatus 
+            });
+            
+            logger.info('Meeting status updated after rejection:', {
+              meeting_id: existingCheckIn.meeting_id,
+              old_status: meeting.status,
+              new_status: newMeetingStatus
+            });
+          }
+        } catch (meetingUpdateError) {
+          logger.error('Error updating meeting status after rejection:', meetingUpdateError);
+          // Don't fail the check-in update if meeting update fails
+        }
+      }
+
+      // Dispatch event to notify salesperson
+      // This will be handled by the frontend event listeners
 
       res.json({
         success: true,

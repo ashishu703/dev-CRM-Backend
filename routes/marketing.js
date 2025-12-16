@@ -4,6 +4,7 @@ const multer = require('multer');
 const { protect } = require('../middleware/auth');
 const MarketingMeetingController = require('../controllers/marketingMeetingController');
 const MarketingCheckInController = require('../controllers/marketingCheckInController');
+const MarketingOrderController = require('../controllers/marketingOrderController');
 
 // Configure multer for memory storage (for photo uploads)
 const storage = multer.memoryStorage();
@@ -146,6 +147,40 @@ router.get('/check-ins/:id', MarketingCheckInController.getById.bind(MarketingCh
  * Update check-in status (verify/reject) (Marketing Sales Head)
  */
 router.put('/check-ins/:id', MarketingCheckInController.update.bind(MarketingCheckInController));
+
+// ============================================
+// ORDER ROUTES
+// ============================================
+
+/**
+ * POST /api/marketing/orders
+ * Create a new order (Marketing Salesperson)
+ */
+router.post('/orders', MarketingOrderController.create.bind(MarketingOrderController));
+
+/**
+ * GET /api/marketing/orders
+ * Get all orders for logged-in salesperson (Marketing Salesperson)
+ */
+router.get('/orders', MarketingOrderController.getAll.bind(MarketingOrderController));
+
+/**
+ * GET /api/marketing/orders/:id
+ * Get order by ID
+ */
+router.get('/orders/:id', MarketingOrderController.getById.bind(MarketingOrderController));
+
+/**
+ * PUT /api/marketing/orders/:id
+ * Update order
+ */
+router.put('/orders/:id', MarketingOrderController.update.bind(MarketingOrderController));
+
+/**
+ * DELETE /api/marketing/orders/:id
+ * Delete order
+ */
+router.delete('/orders/:id', MarketingOrderController.delete.bind(MarketingOrderController));
 
 module.exports = router;
 
