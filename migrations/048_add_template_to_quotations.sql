@@ -11,3 +11,4 @@ COMMENT ON COLUMN quotations.template IS 'Template identifier: template1 (Classi
 CREATE INDEX IF NOT EXISTS idx_quotations_template ON quotations(template);
 
 
+

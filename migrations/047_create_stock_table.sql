@@ -60,3 +60,4 @@ INSERT INTO stock (product_name, quantity, unit, status) VALUES
 ON CONFLICT (product_name) DO NOTHING;
 
 
+
