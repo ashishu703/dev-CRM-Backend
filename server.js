@@ -26,25 +26,53 @@ const ticketRoutes = require('./routes/tickets');
 const securityLogRoutes = require('./routes/securityLogs');
 const stockRoutes = require('./routes/stock');
 const workOrderRoutes = require('./routes/workOrders');
+const marketingRoutes = require('./routes/marketing');
 const organizationRoutes = require('./routes/organizations');
 const tradeIndiaRoutes = require('./routes/tradeIndia');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
 
-// Security middleware
-app.use(helmet());
+// Security middleware - configure helmet to work with CORS
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  crossOriginEmbedderPolicy: false,
+}));
+
+// CORS configuration - allow localhost for development and include production origins
+const getAllowedOrigins = () => {
+  const origins = [];
+  
+  // Always allow localhost origins for development
+  origins.push('http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173');
+  
+  // Add production origins if specified
+  if (process.env.ALLOWED_ORIGINS) {
+    const productionOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
+    origins.push(...productionOrigins);
+  }
+  
+  // In development mode, allow all origins
+  if (process.env.NODE_ENV !== 'production') {
+    return true;
+  }
+  
+  // In production, use the specific origins list
+  return origins.length > 0 ? origins : true;
+};
 
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' ? (process.env.ALLOWED_ORIGINS?.split(',') || []) : true,
+  origin: getAllowedOrigins(),
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   optionsSuccessStatus: 204,
 };
 
+// Apply CORS middleware - this handles both regular requests and preflight OPTIONS requests
 app.use(cors(corsOptions));
-// Handle CORS preflight requests explicitly
+
+// Explicitly handle OPTIONS preflight requests for all routes
 app.options('*', cors(corsOptions));
 
 // Rate limiting - increased limit for development to prevent IP blocking during testing
@@ -57,8 +85,12 @@ const limiter = rateLimit({
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (isDevelopment ? 1000 : 100),
   standardHeaders: true,
   legacyHeaders: false,
-  // Skip limiting for local development, localhost IPs, and trusted IPs
+  // Skip limiting for OPTIONS requests (CORS preflight), local development, localhost IPs, and trusted IPs
   skip: (req) => {
+    // Always skip OPTIONS requests (CORS preflight)
+    if (req.method === 'OPTIONS') {
+      return true;
+    }
     const ip = req.ip || req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.headers['x-real-ip'] || '';
     const isLocalIp = 
       ip === '::1' || 
@@ -135,6 +167,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/work-orders', workOrderRoutes);
+app.use('/api/marketing', marketingRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/admin', adminRoutes);

@@ -294,12 +294,45 @@ class SalespersonLeadController {
       });
 
       const result = await DepartmentHeadLead.bulkCreateFromUi(rows, createdBy);
-      // Sync each created id - skip errors and continue
+      // Sync each created id and create meetings - skip errors and continue
       if (result?.rows?.length) {
+        const MarketingMeeting = require('../models/MarketingMeeting');
         for (const r of result.rows) {
           if (r.id) {
             try {
               await leadAssignmentService.syncSalespersonLead(r.id);
+              
+              // Create meeting for imported lead if assigned to salesperson
+              if (r.assigned_salesperson || username) {
+                try {
+                  const meetingDate = r.date || new Date().toISOString().split('T')[0];
+                  const leadAddress = r.address || 'Address not provided';
+                  const meeting_id = await MarketingMeeting.generateMeetingId();
+                  
+                  await MarketingMeeting.create({
+                    meeting_id,
+                    customer_id: r.id,
+                    lead_id: r.id,
+                    customer_name: r.customer || r.name || 'N/A',
+                    customer_phone: r.phone || null,
+                    customer_email: r.email || null,
+                    address: leadAddress,
+                    city: r.city || null,
+                    state: r.state || null,
+                    pincode: r.pincode || null,
+                    assigned_to: r.assigned_salesperson || username,
+                    assigned_by: createdBy,
+                    meeting_date: meetingDate,
+                    meeting_time: null,
+                    scheduled_date: meetingDate,
+                    status: 'Scheduled',
+                    notes: `Imported by salesperson: ${username}`
+                  });
+                } catch (meetingError) {
+                  console.error(`Error creating meeting for imported lead ${r.id}:`, meetingError);
+                  // Don't block import if meeting creation fails
+                }
+              }
             } catch (syncError) {
               console.error(`Error syncing lead ${r.id} to salesperson_leads:`, syncError.message);
               // Continue with next lead

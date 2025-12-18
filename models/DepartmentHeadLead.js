@@ -183,6 +183,25 @@ class DepartmentHeadLead extends BaseModel {
     super('department_head_leads');
   }
 
+  /**
+   * Check if is_deleted column exists in department_head_leads table
+   * @returns {Promise<boolean>}
+   */
+  async hasIsDeletedColumn() {
+    try {
+      const columnCheckQuery = `
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'department_head_leads' 
+        AND column_name = 'is_deleted'
+      `;
+      const columnCheck = await DepartmentHeadLead.query(columnCheckQuery);
+      return columnCheck.rows.length > 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
   generateCustomerId() {
     const timestamp = Date.now().toString().slice(-6);
     const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
@@ -551,6 +570,13 @@ class DepartmentHeadLead extends BaseModel {
     builder.addCondition('dhl.state', filters.state);
     builder.addCondition('dhl.product_names', filters.productType);
     builder.addCondition('dhl.sales_status', filters.salesStatus);
+    
+    // Exclude deleted leads by default (unless explicitly requested)
+    if (filters.includeDeleted !== true) {
+      // Add condition to exclude deleted leads
+      const paramCount = builder.getParamCount() + 1;
+      builder.conditions.push(`COALESCE(dhl.is_deleted, FALSE) = FALSE`);
+    }
 
     let query = baseQuery + builder.buildWhereClause();
     query += ' ORDER BY dhl.created_at ASC';
@@ -573,9 +599,32 @@ class DepartmentHeadLead extends BaseModel {
   }
 
   async getAll(filters = {}, pagination = {}) {
-    const { query, values } = this.buildGetAllQuery(filters, pagination);
-    const result = await DepartmentHeadLead.query(query, values);
-    return result.rows || [];
+    // Check if is_deleted column exists before building query
+    const hasIsDeletedColumn = await this.hasIsDeletedColumn();
+    
+    // If column doesn't exist and we're trying to filter by it, skip the filter
+    const modifiedFilters = { ...filters };
+    if (!hasIsDeletedColumn && modifiedFilters.includeDeleted !== true) {
+      // Column doesn't exist, so we can't filter by it - include all leads
+      modifiedFilters.includeDeleted = true;
+    }
+    
+    const { query, values } = this.buildGetAllQuery(modifiedFilters, pagination);
+    
+    try {
+      const result = await DepartmentHeadLead.query(query, values);
+      return result.rows || [];
+    } catch (error) {
+      // If query fails due to missing is_deleted column, retry without the filter
+      if (error.message && error.message.includes('is_deleted')) {
+        console.warn('is_deleted column not found, retrying query without deleted filter');
+        const fallbackFilters = { ...filters, includeDeleted: true };
+        const { query: fallbackQuery, values: fallbackValues } = this.buildGetAllQuery(fallbackFilters, pagination);
+        const result = await DepartmentHeadLead.query(fallbackQuery, fallbackValues);
+        return result.rows || [];
+      }
+      throw error;
+    }
   }
 
   buildGetByIdQuery(id, userEmail, departmentType, companyName) {
