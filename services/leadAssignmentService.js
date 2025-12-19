@@ -130,6 +130,7 @@ class LeadAssignmentService {
       date: DataValidator.normalizeDate(dhLead.date),
       sales_status: preserveData(dhLead.sales_status),
       whatsapp: whatsapp,
+      division: preserveData(dhLead.division),
       created_by: dhLead.created_by || 'system',
     };
 

@@ -6,7 +6,7 @@ const CONSTANTS = {
   BATCH_SIZE: 1000,
   DUPLICATE_CHECK_BATCH_SIZE: 1500,
   MAX_CUSTOMER_ID_ATTEMPTS: 100,
-  PARAMS_PER_ROW: 21
+  PARAMS_PER_ROW: 22
 };
 
 const FIELD_MAP = {
@@ -26,7 +26,7 @@ const ALLOWED_UPDATE_FIELDS = [
   'customer', 'email', 'business', 'leadSource', 'productNames', 'category',
   'salesStatus', 'created', 'telecallerStatus', 'paymentStatus',
   'phone', 'address', 'gstNo', 'state', 'customerType', 'date',
-  'whatsapp', 'assignedSalesperson', 'assignedTelecaller'
+  'whatsapp', 'assignedSalesperson', 'assignedTelecaller', 'division'
 ];
 
 // Data Validator Utility Class
@@ -279,6 +279,7 @@ class DepartmentHeadLead extends BaseModel {
       whatsapp,
       DepartmentHeadLead.normalizeForDB(lead.assignedSalesperson),
       DepartmentHeadLead.normalizeForDB(lead.assignedTelecaller),
+      DepartmentHeadLead.normalizeForDB(lead.division),
       createdBy || 'system'
     ];
   }
@@ -414,7 +415,7 @@ class DepartmentHeadLead extends BaseModel {
         customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        whatsapp, assigned_salesperson, assigned_telecaller,
+        whatsapp, assigned_salesperson, assigned_telecaller, division,
         created_by, created_at, updated_at
       ) VALUES ${placeholders}
       ON CONFLICT (customer_id) DO NOTHING
@@ -465,9 +466,9 @@ class DepartmentHeadLead extends BaseModel {
         customer_id, customer, email, business, lead_source, product_names, category,
         sales_status, created, telecaller_status, payment_status,
         phone, address, gst_no, state, customer_type, date,
-        whatsapp, assigned_salesperson, assigned_telecaller,
+        whatsapp, assigned_salesperson, assigned_telecaller, division,
         created_by, created_at, updated_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,NOW(),NOW())
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW())
       RETURNING id
     `;
 
