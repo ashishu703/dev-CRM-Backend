@@ -370,6 +370,7 @@ class SalespersonLeadController {
       updatePayload.follow_up_status = toNullIfEmpty(updatePayload.follow_up_status);
       updatePayload.follow_up_remark = toNullIfEmpty(updatePayload.follow_up_remark);
       updatePayload.transferred_to = toNullIfEmpty(updatePayload.transferred_to);
+      updatePayload.division = toNullIfEmpty(updatePayload.division);
 
       if (updatePayload.quotation_count === '' || updatePayload.quotation_count === undefined) {
         updatePayload.quotation_count = null;
@@ -417,6 +418,7 @@ class SalespersonLeadController {
           gst_no: 'gst_no',
           product_type: 'product_names',
           state: 'state',
+          division: 'division',
           lead_source: 'lead_source',
         };
         if (!assignedToUser) {
@@ -464,6 +466,7 @@ class SalespersonLeadController {
         if (updatePayload.gst_no !== undefined) dhUpdate.gstNo = updatePayload.gst_no;
         if (updatePayload.product_type !== undefined) dhUpdate.productNames = updatePayload.product_type;
         if (updatePayload.state !== undefined) dhUpdate.state = updatePayload.state;
+        if (updatePayload.division !== undefined) dhUpdate.division = updatePayload.division;
         if (updatePayload.lead_source !== undefined) dhUpdate.leadSource = updatePayload.lead_source;
         if (updatePayload.customer_type !== undefined) {
           dhUpdate.customerType = updatePayload.customer_type;

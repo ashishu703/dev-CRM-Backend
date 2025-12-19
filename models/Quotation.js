@@ -23,10 +23,10 @@ class Quotation extends BaseModel {
           quotation_date, valid_until, branch,
           subtotal, tax_rate, tax_amount, discount_rate, discount_amount, total_amount,
           template, payment_mode, transport_tc, dispatch_through, delivery_terms, material_type,
-          bank_details, terms_sections, bill_to
+          bank_details, terms_sections, bill_to, remark
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-          $22, $23, $24, $25, $26, $27, $28, $29, $30
+          $22, $23, $24, $25, $26, $27, $28, $29, $30, $31
         ) RETURNING *
       `;
       
@@ -64,7 +64,8 @@ class Quotation extends BaseModel {
         quotationData.materialType || null,
         quotationData.bankDetails ? JSON.stringify(quotationData.bankDetails) : null,
         quotationData.termsSections ? JSON.stringify(quotationData.termsSections) : null,
-        quotationData.billTo ? JSON.stringify(quotationData.billTo) : null
+        quotationData.billTo ? JSON.stringify(quotationData.billTo) : null,
+        quotationData.remark || null
       ];
       
       console.log('📤 Quotation values:', quotationValues);
@@ -79,8 +80,8 @@ class Quotation extends BaseModel {
           const itemQuery = `
             INSERT INTO quotation_items (
               quotation_id, item_order, product_name, description, hsn_code,
-              quantity, unit, unit_price, gst_rate, taxable_amount, gst_amount, total_amount
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+              quantity, unit, unit_price, gst_rate, taxable_amount, gst_amount, total_amount, remark
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
           `;
           
           const itemValues = [
@@ -95,7 +96,8 @@ class Quotation extends BaseModel {
             item.gstRate || 18.00,
             item.taxableAmount,
             item.gstAmount,
-            item.totalAmount
+            item.totalAmount,
+            item.remark || null
           ];
           
           await query(itemQuery, itemValues);
@@ -107,6 +109,113 @@ class Quotation extends BaseModel {
       
     } catch (error) {
       await query('ROLLBACK');
+      throw error;
+    }
+  }
+
+  // Update quotation with items
+  async updateById(id, updateData) {
+    const { query } = require('../config/database');
+    
+    try {
+      await query('BEGIN');
+      
+      // Update quotation
+      const quotationUpdateFields = [];
+      const quotationValues = [];
+      let paramCount = 1;
+      
+      const fieldsToUpdate = {
+        quotation_date: updateData.quotationDate,
+        valid_until: updateData.validUntil,
+        branch: updateData.branch,
+        customer_name: updateData.customerName,
+        customer_business: updateData.customerBusiness,
+        customer_phone: updateData.customerPhone,
+        customer_email: updateData.customerEmail,
+        customer_address: updateData.customerAddress,
+        customer_gst_no: updateData.customerGstNo,
+        customer_state: updateData.customerState,
+        subtotal: updateData.subtotal,
+        tax_rate: updateData.taxRate,
+        tax_amount: updateData.taxAmount,
+        discount_rate: updateData.discountRate,
+        discount_amount: updateData.discountAmount,
+        total_amount: updateData.totalAmount,
+        template: updateData.template,
+        payment_mode: updateData.paymentMode,
+        transport_tc: updateData.transportTc,
+        dispatch_through: updateData.dispatchThrough,
+        delivery_terms: updateData.deliveryTerms,
+        material_type: updateData.materialType,
+        bank_details: updateData.bankDetails ? JSON.stringify(updateData.bankDetails) : null,
+        terms_sections: updateData.termsSections ? JSON.stringify(updateData.termsSections) : null,
+        bill_to: updateData.billTo ? JSON.stringify(updateData.billTo) : null,
+        remark: updateData.remark,
+        status: 'draft', // Reset to draft when editing
+        updated_at: new Date().toISOString()
+      };
+      
+      Object.entries(fieldsToUpdate).forEach(([key, value]) => {
+        if (value !== undefined) {
+          quotationUpdateFields.push(`${key} = $${paramCount++}`);
+          quotationValues.push(value);
+        }
+      });
+      
+      if (quotationUpdateFields.length > 0) {
+        quotationValues.push(id);
+        const quotationUpdateQuery = `
+          UPDATE quotations 
+          SET ${quotationUpdateFields.join(', ')}
+          WHERE id = $${paramCount}
+          RETURNING *
+        `;
+        await query(quotationUpdateQuery, quotationValues);
+      }
+      
+      // Delete existing items
+      await query('DELETE FROM quotation_items WHERE quotation_id = $1', [id]);
+      
+      // Insert new items
+      const items = updateData.items || [];
+      if (items.length > 0) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const itemQuery = `
+            INSERT INTO quotation_items (
+              quotation_id, item_order, product_name, description, hsn_code,
+              quantity, unit, unit_price, gst_rate, taxable_amount, gst_amount, total_amount, remark
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          `;
+          
+          const itemValues = [
+            id,
+            i + 1,
+            item.productName,
+            item.description || item.productName,
+            item.hsnCode || item.hsn || '',
+            item.quantity,
+            item.unit || 'Nos',
+            item.unitPrice || item.buyerRate,
+            item.gstRate || 18.00,
+            item.taxableAmount || item.amount,
+            item.gstAmount || (item.amount * (item.gstRate || 18.00) / 100),
+            item.totalAmount || (item.amount * (1 + (item.gstRate || 18.00) / 100)),
+            item.remark || null
+          ];
+          
+          await query(itemQuery, itemValues);
+        }
+      }
+      
+      await query('COMMIT');
+      
+      // Return updated quotation with items
+      return await this.getWithItems(id);
+    } catch (error) {
+      await query('ROLLBACK');
+      console.error('Error updating quotation:', error);
       throw error;
     }
   }

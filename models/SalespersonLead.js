@@ -25,17 +25,18 @@ class SalespersonLead extends BaseModel {
       date,
       sales_status,
       whatsapp,
+      division,
       created_by,
     } = payload;
 
     const query = `
       INSERT INTO salesperson_leads (
         id, dh_lead_id, name, phone, email, business, address, gst_no, product_type,
-        state, lead_source, customer_type, date, sales_status, whatsapp,
+        state, lead_source, customer_type, date, sales_status, whatsapp, division,
         created_by, created_at, updated_at
       ) VALUES (
         $1,$2,$3,$4,$5,$6,$7,$8,$9,
-        $10,$11,$12,$13,$14,$15,$16,
+        $10,$11,$12,$13,$14,$15,$16,$17,
         NOW(), NOW()
       )
       ON CONFLICT (id) DO UPDATE SET
@@ -53,6 +54,7 @@ class SalespersonLead extends BaseModel {
         date = EXCLUDED.date,
         sales_status = EXCLUDED.sales_status,
         whatsapp = EXCLUDED.whatsapp,
+        division = EXCLUDED.division,
         updated_at = NOW()
     `;
 
@@ -72,6 +74,7 @@ class SalespersonLead extends BaseModel {
       date,
       sales_status,
       whatsapp,
+      division,
       created_by,
     ];
 
@@ -521,6 +524,7 @@ class SalespersonLead extends BaseModel {
       'gst_no',
       'product_type',
       'state',
+      'division',
       'lead_source',
       'customer_type',
       'date',

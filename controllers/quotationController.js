@@ -50,7 +50,10 @@ class QuotationController {
         termsSections: req.body.termsSections || null,
         
         // Bill To Details (JSON)
-        billTo: req.body.billTo || null
+        billTo: req.body.billTo || null,
+        
+        // Remark field
+        remark: req.body.remark || null
       };
 
       console.log('💾 Saving quotation with data:', quotationData);
