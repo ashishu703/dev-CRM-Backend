@@ -185,14 +185,6 @@ class DepartmentUserController extends BaseController {
           const userJson = user.toJSON();
           const enrichedUser = await DepartmentUserController._enrichUserTargetData(userJson);
           
-          // Debug log (can be removed in production)
-          console.log('TARGET DEBUG', {
-            user: enrichedUser.username,
-            target: parseFloat(enrichedUser.target || 0),
-            achieved: enrichedUser.achieved_target,
-            remaining: enrichedUser.remaining_target,
-          });
-          
           return enrichedUser;
         })
       );

@@ -22,33 +22,39 @@ const baseConfig = useConnectionString
 
 const pool = new Pool({
   ...baseConfig,
-  max: 20,
-  idleTimeoutMillis: 60000, // keep clients around a bit longer
-  connectionTimeoutMillis: 20000, // allow more time to establish remote TLS connections
+  max: 50, 
+  min: 5, 
+  idleTimeoutMillis: 30000, 
+  connectionTimeoutMillis: 30000, 
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
   statement_timeout: Number(process.env.DB_STATEMENT_TIMEOUT_MS) || 60000,
-  query_timeout: Number(process.env.DB_QUERY_TIMEOUT_MS) || 60000
+  query_timeout: Number(process.env.DB_QUERY_TIMEOUT_MS) || 60000,
+  allowExitOnIdle: false 
 });
 
-// Test the connection
 pool.on('connect', () => {
-  logger.info('Connected to PostgreSQL database');
+  // Database connection established (logging removed for cleaner output)
 });
 
 pool.on('error', (err) => {
-  // Do NOT crash the process on idle client errors. These can happen due to
-  // transient network issues (e.g., EADDRNOTAVAIL during read). Log them and
-  // allow the pool to recover.
-  logger.error('Unexpected error on idle client', err);
-  if (err && err.code === 'EADDRNOTAVAIL') {
-    // Network address not available: often transient. Let pg reconnect.
+  const errorMsg = err?.message || '';
+  const isConnectionError = errorMsg.includes('Connection terminated') || 
+                           errorMsg.includes('connection terminated unexpectedly') ||
+                           err?.code === 'EADDRNOTAVAIL' ||
+                           err?.code === 'ECONNRESET';
+  
+  if (isConnectionError) {
+    logger.warn('Connection error on idle client (will retry)', { 
+      code: err?.code, 
+      message: errorMsg 
+    });
     return;
   }
-  // For other errors, still avoid exiting; rely on pg-pool to manage clients.
+  
+  logger.error('Unexpected error on idle client', err);
 });
 
-// Helper function to run queries
 const isTransientDbError = (err) => {
   if (!err) return false;
   const code = err.code || '';
@@ -57,15 +63,20 @@ const isTransientDbError = (err) => {
     code === 'ETIMEDOUT' ||
     code === 'ECONNRESET' ||
     code === 'EADDRNOTAVAIL' ||
+    msg.includes('connection terminated') ||
     msg.includes('connection terminated due to connection timeout') ||
-    msg.includes('terminating connection due to administrator command')
+    msg.includes('terminating connection due to administrator command') ||
+    msg.includes('connection terminated unexpectedly') ||
+    code === '57P01' || 
+    code === '57P02' || 
+    code === '57P03'    
   );
 };
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const query = async (text, params) => {
-  const maxRetries = 3;
+  const maxRetries = 5; 
   const start = Date.now();
   let attempt = 0;
   while (true) {
@@ -81,20 +92,17 @@ const query = async (text, params) => {
       if (!transient || attempt >= maxRetries) {
         throw error;
       }
-      const backoff = 300 * attempt;
+      const backoff = Math.min(100 * Math.pow(2, attempt - 1) + Math.random() * 100, 2000);
       await delay(backoff);
-      // retry
     }
   }
 };
 
-// Helper function to get a client for transactions
 const getClient = async () => {
   const client = await pool.connect();
   const query = client.query.bind(client);
   const release = client.release.bind(client);
   
-  // Set a timeout of 5 seconds, after which we will log this client's last query
   const timeout = setTimeout(() => {
     logger.error('A client has been checked out for more than 5 seconds!');
     logger.error(`The last executed query on this client was: ${client.lastQuery}`);

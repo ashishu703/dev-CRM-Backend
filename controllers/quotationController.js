@@ -639,75 +639,101 @@ class QuotationController {
         });
       }
 
-      // Fetch summaries for all quotations
-      const summaries = [];
+      // OPTIMIZED: Fetch all quotations in parallel
+      const quotationPromises = idsArray.map(id => Quotation.getWithItems(id));
+      const quotations = await Promise.all(quotationPromises);
       
-      for (const quotationId of idsArray) {
-        try {
-          // Get quotation with items
-          const quotation = await Quotation.getWithItems(quotationId);
-          
-          if (!quotation) {
-            summaries.push({
-              quotation_id: quotationId,
-              error: 'Quotation not found'
-            });
-            continue;
-          }
-
-          // Get PIs for this quotation
-          const piQuery = `
-            SELECT * FROM proforma_invoices 
-            WHERE quotation_id = $1
-            ORDER BY created_at DESC
-          `;
-          const piResult = await query(piQuery, [quotationId]);
-          const pis = piResult.rows || [];
-
-          // Get payments for this quotation
-          const paymentQuery = `
-            SELECT * FROM payment_history 
-            WHERE quotation_id = $1
-            ORDER BY payment_date DESC, created_at DESC
-          `;
-          const paymentResult = await query(paymentQuery, [quotationId]);
-          const payments = paymentResult.rows || [];
-
-          // Calculate payment totals
-          const completedPayments = payments.filter(p => 
-            p.payment_status === 'completed' && !p.is_refund
-          );
-          const totalPaid = completedPayments.reduce((sum, p) => 
-            sum + Number(p.installment_amount || 0), 0
-          );
-          const advancePayment = completedPayments.find(p => 
-            p.installment_number === 1 || p.payment_type === 'advance'
-          );
-          const advanceAmount = advancePayment ? Number(advancePayment.installment_amount || 0) : 0;
-          const dueAmount = Math.max(0, Number(quotation.total_amount) - totalPaid);
-
-          summaries.push({
-            quotation_id: quotationId,
-            quotation,
-            pis,
-            payments,
-            summary: {
-              total_amount: Number(quotation.total_amount),
-              total_paid: totalPaid,
-              advance_amount: advanceAmount,
-              due_amount: dueAmount,
-              pi_count: pis.length,
-              payment_count: payments.length
-            }
-          });
-        } catch (err) {
-          console.warn(`Error fetching summary for quotation ${quotationId}:`, err);
-          summaries.push({
-            quotation_id: quotationId,
-            error: err.message
-          });
+      // OPTIMIZED: Fetch all PIs in one query
+      const placeholders = idsArray.map((_, index) => `$${index + 1}`).join(',');
+      const piQuery = `
+        SELECT * FROM proforma_invoices 
+        WHERE quotation_id IN (${placeholders})
+        ORDER BY created_at DESC
+      `;
+      const piResult = await query(piQuery, idsArray);
+      const allPIs = piResult.rows || [];
+      
+      // OPTIMIZED: Fetch all payments in one query
+      const paymentQuery = `
+        SELECT * FROM payment_history 
+        WHERE quotation_id IN (${placeholders})
+        ORDER BY payment_date DESC, created_at DESC
+      `;
+      const paymentResult = await query(paymentQuery, idsArray);
+      const allPayments = paymentResult.rows || [];
+      
+      // Group PIs and payments by quotation_id
+      const pisByQuotation = new Map();
+      const paymentsByQuotation = new Map();
+      
+      allPIs.forEach(pi => {
+        const qId = pi.quotation_id;
+        if (!pisByQuotation.has(qId)) {
+          pisByQuotation.set(qId, []);
         }
-      }
+        pisByQuotation.get(qId).push(pi);
+      });
+      
+      allPayments.forEach(payment => {
+        const qId = payment.quotation_id;
+        if (!paymentsByQuotation.has(qId)) {
+          paymentsByQuotation.set(qId, []);
+        }
+        paymentsByQuotation.get(qId).push(payment);
+      });
+      
+      // OPTIMIZED: Process summaries in parallel
+      const summaries = await Promise.all(
+        idsArray.map(async (quotationId, index) => {
+          try {
+            const quotation = quotations[index];
+            
+            if (!quotation) {
+              return {
+                quotation_id: quotationId,
+                error: 'Quotation not found'
+              };
+            }
+
+            const pis = pisByQuotation.get(quotationId) || [];
+            const payments = paymentsByQuotation.get(quotationId) || [];
+
+            // Calculate payment totals
+            const completedPayments = payments.filter(p => 
+              p.payment_status === 'completed' && !p.is_refund
+            );
+            const totalPaid = completedPayments.reduce((sum, p) => 
+              sum + Number(p.installment_amount || 0), 0
+            );
+            const advancePayment = completedPayments.find(p => 
+              p.installment_number === 1 || p.payment_type === 'advance'
+            );
+            const advanceAmount = advancePayment ? Number(advancePayment.installment_amount || 0) : 0;
+            const dueAmount = Math.max(0, Number(quotation.total_amount) - totalPaid);
+
+            return {
+              quotation_id: quotationId,
+              quotation,
+              pis,
+              payments,
+              summary: {
+                total_amount: Number(quotation.total_amount),
+                total_paid: totalPaid,
+                advance_amount: advanceAmount,
+                due_amount: dueAmount,
+                pi_count: pis.length,
+                payment_count: payments.length
+              }
+            };
+          } catch (err) {
+            console.warn(`Error fetching summary for quotation ${quotationId}:`, err);
+            return {
+              quotation_id: quotationId,
+              error: err.message
+            };
+          }
+        })
+      );
       
       res.json({
         success: true,
