@@ -22,9 +22,6 @@ class SalespersonLeadController {
       const departmentType = req.user?.departmentType || null;
       const companyName = req.user?.companyName || null;
       
-      // DEBUG: Log username and email for troubleshooting
-      console.log(`[SalespersonLeadController] Fetching leads for username: ${username}, email: ${userEmail}, departmentType: ${departmentType}, companyName: ${companyName}`);
-      
       // OPTIMIZED: Support pagination and document status
       const page = parseInt(req.query.page) || 1;
       const limit = parseInt(req.query.limit) || 20;
@@ -33,7 +30,6 @@ class SalespersonLeadController {
       if (includeDocStatus) {
         // Use optimized method with document status
         const result = await SalespersonLead.listForUserWithDocStatus(username, departmentType, companyName, page, limit, userEmail);
-        console.log(`[SalespersonLeadController] Found ${result.total} total leads for username: ${username}, email: ${userEmail}`);
         return res.json({ 
           success: true, 
           data: result.leads,
@@ -47,7 +43,6 @@ class SalespersonLeadController {
       } else {
         // Backward compatibility: return all leads without pagination
         const rows = await SalespersonLead.listForUser(username, departmentType, companyName, userEmail);
-        console.log(`[SalespersonLeadController] Found ${rows.length} leads for username: ${username}, email: ${userEmail}`);
         return res.json({ success: true, data: rows });
       }
     } catch (error) {

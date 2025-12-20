@@ -155,30 +155,14 @@ class SalespersonLead extends BaseModel {
       ORDER BY lead_count DESC
       LIMIT 10
     `;
-    try {
-      const debugResult = await SalespersonLead.query(debugQuery, debugValues);
-      console.log('[SalespersonLead.listForUser] Sample assigned_salesperson values in DB:', JSON.stringify(debugResult.rows, null, 2));
-    } catch (err) {
-      console.error('[SalespersonLead.listForUser] Error checking DB values:', err.message);
-    }
-    
     const conditions = [];
     const values = [];
     let paramCount = 1;
     
     const matchResult = this._buildAssignmentMatchConditions(username, userEmail, paramCount);
     if (matchResult.conditions.length === 0) {
-      console.warn('[SalespersonLead.listForUser] No valid matching conditions, returning empty');
       return [];
     }
-    
-    // Log what we're trying to match
-    console.log(`[SalespersonLead.listForUser] Trying to match against:`, {
-      username: username ? username.toLowerCase().trim() : null,
-      email: userEmail ? userEmail.toLowerCase().trim() : null,
-      emailLocal: userEmail ? userEmail.toLowerCase().trim().split('@')[0] : null,
-      matchValues: matchResult.values
-    });
     
     // Assignment matching: must match user AND not be empty
     conditions.push(`(${matchResult.conditions.join(' OR ')})`);
@@ -215,33 +199,8 @@ class SalespersonLead extends BaseModel {
       ORDER BY sl.id ASC
     `;
     
-    // Debug logging
-    console.log(`[SalespersonLead.listForUser] Query for username: ${username}, email: ${userEmail}, dept: ${departmentType}, company: ${companyName}`);
-    console.log(`[SalespersonLead.listForUser] Query: ${query.replace(/\$\d+/g, '?')}`);
-    console.log(`[SalespersonLead.listForUser] Values:`, values);
-    
     const result = await SalespersonLead.query(query, values);
     const rowCount = result.rows?.length || 0;
-    console.log(`[SalespersonLead.listForUser] Found ${rowCount} leads for user`);
-    
-    // DEBUG: Check a sample of what was actually matched (only in development, not dummy data)
-    if (process.env.NODE_ENV === 'development' && rowCount > 0 && result.rows.length > 0) {
-      const sampleLeadIds = result.rows.slice(0, 3).map(r => r.id);
-      const sampleQuery = `
-        SELECT 
-          dhl.id,
-          dhl.assigned_salesperson,
-          TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) as assigned_normalized
-        FROM department_head_leads dhl
-        WHERE dhl.id = ANY($1)
-      `;
-      try {
-        const sampleResult = await SalespersonLead.query(sampleQuery, [sampleLeadIds]);
-        console.log('[SalespersonLead.listForUser] DEBUG: Sample matched leads (first 3) - these are REAL leads, not dummy:', sampleResult.rows);
-      } catch (err) {
-        console.error('[SalespersonLead.listForUser] Error checking sample leads:', err.message);
-      }
-    }
     
     return result.rows || [];
   }
@@ -329,8 +288,6 @@ class SalespersonLead extends BaseModel {
     const total = parseInt(countResult.rows[0]?.total || 0);
     
     // Debug logging
-    console.log(`[SalespersonLead.listForUserWithDocStatus] Query for username: ${username}, email: ${userEmail}, dept: ${departmentType}, company: ${companyName}`);
-    console.log(`[SalespersonLead.listForUserWithDocStatus] Total count: ${total}`);
     
     // Get paginated leads
     const offset = (page - 1) * limit;
@@ -348,7 +305,6 @@ class SalespersonLead extends BaseModel {
     const result = await SalespersonLead.query(query, queryValues);
     const leads = result.rows || [];
     
-    console.log(`[SalespersonLead.listForUserWithDocStatus] Found ${leads.length} leads for page ${page}`);
     
     if (leads.length === 0) {
       return {

@@ -347,7 +347,6 @@ class TargetCalculationService {
       const quotationsResult = await db.query(quotationQuery, [leadIds]);
       const quotations = quotationsResult.rows;
       if (quotations.length === 0) {
-        console.log('[TargetCalculation] No approved quotations found for user leads');
         return 0;
       }
 
@@ -367,11 +366,8 @@ class TargetCalculationService {
       // Filter quotations to only those with PIs
       const quotationsWithPI = quotations.filter(q => quotationIdsWithPI.has(q.id.toString()));
       if (quotationsWithPI.length === 0) {
-        console.log('[TargetCalculation] No quotations with PIs found');
         return 0;
       }
-
-      console.log(`[TargetCalculation] Found ${quotationsWithPI.length} approved quotations with PIs for due payment calculation`);
 
       let totalDue = 0;
 
@@ -417,13 +413,11 @@ class TargetCalculationService {
         const remaining = quotationTotal - paidTotal;
         if (remaining > 0) {
           totalDue += remaining;
-          console.log(`[TargetCalculation] Quotation ${quotation.id}: total=${quotationTotal}, paid=${paidTotal}, due=${remaining}`);
         }
       }
 
       // Round to 2 decimal places
       const finalDue = Math.round(totalDue * 100) / 100;
-      console.log(`[TargetCalculation] Total due payment calculated: ${finalDue}`);
       return finalDue;
     } catch (error) {
       console.error('[TargetCalculation] Error calculating due payment:', error);
