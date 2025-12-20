@@ -450,6 +450,47 @@ class SalespersonLeadController {
         console.warn('Lead history write skipped:', e.message);
       }
 
+      // Create enquiry records if enquired_products are present
+      if (updatePayload.enquired_products) {
+        try {
+          const Enquiry = require('../models/Enquiry');
+          
+          // Get lead data from both salesperson and department head tables
+          const spLead = result?.row || {};
+          const dhLead = dhRow || {};
+          
+          // Get assigned salesperson and telecaller from department head lead
+          const assignedSalesperson = dhLead.assigned_salesperson || username || null;
+          const assignedTelecaller = dhLead.assigned_telecaller || null;
+          
+          const enquiryData = {
+            lead_id: id,
+            customer_name: spLead.name || dhLead.customer || updatePayload.name || '',
+            business: spLead.business || dhLead.business || updatePayload.business || null,
+            address: spLead.address || dhLead.address || updatePayload.address || null,
+            state: spLead.state || dhLead.state || updatePayload.state || null,
+            division: spLead.division || dhLead.division || updatePayload.division || null,
+            follow_up_status: updatePayload.follow_up_status || null,
+            follow_up_remark: updatePayload.follow_up_remark || null,
+            sales_status: updatePayload.sales_status || null,
+            sales_status_remark: updatePayload.sales_status_remark || null,
+            enquired_products: updatePayload.enquired_products,
+            other_product: updatePayload.other_product || null,
+            salesperson: assignedSalesperson,
+            telecaller: assignedTelecaller,
+            enquiry_date: updatePayload.follow_up_date || new Date().toISOString().split('T')[0]
+          };
+          
+          const createdEnquiries = await Enquiry.createEnquiries(enquiryData);
+          if (createdEnquiries && createdEnquiries.length > 0) {
+            console.log(`Created ${createdEnquiries.length} enquiry records for lead ${id}`);
+          }
+        } catch (e) {
+          console.error('Enquiry creation failed:', e);
+          // Don't fail the entire update if enquiry creation fails
+        }
+      }
+
       // Sync updates back to Department Head lead record (same id)
       try {
         const dhUpdate = {};

@@ -14,6 +14,7 @@ const {
   bulkDeleteSchema
 } = require('../apis/leads/validators');
 const SalespersonLeadController = require('../controllers/salespersonLeadController');
+const EnquiryController = require('../controllers/enquiryController');
 const upload = require('../middleware/upload');
 
 router.use(protect);
@@ -56,5 +57,10 @@ router.put(
   validateRequest(require('../apis/leads/validators').salespersonLeadUpdateSchema),
   SalespersonLeadController.updateById
 );
+
+// Enquiry routes for department head
+router.get('/enquiries/department-head', EnquiryController.getForDepartmentHead);
+router.put('/enquiries/:id', validateRequest(idParamSchema, 'params'), EnquiryController.update);
+router.delete('/enquiries/:id', validateRequest(idParamSchema, 'params'), EnquiryController.delete);
 
 module.exports = router;
