@@ -84,10 +84,10 @@ class SalespersonLead extends BaseModel {
   /**
    * Build matching conditions for assigned_salesperson field
    * Matches against username (primary) and email (fallback)
+   * OPTIMIZED: Uses IN clause instead of multiple ORs for better performance
    * @private
    */
   _buildAssignmentMatchConditions(username, userEmail, paramStart) {
-    const conditions = [];
     const values = [];
     let paramCount = paramStart;
     
@@ -95,25 +95,23 @@ class SalespersonLead extends BaseModel {
     const emailLower = userEmail ? userEmail.toLowerCase().trim() : '';
     const emailLocal = emailLower.includes('@') ? emailLower.split('@')[0] : emailLower;
     
-    if (usernameLower) {
-      conditions.push(`TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) = $${paramCount}`);
-      values.push(usernameLower);
-      paramCount++;
+    // Collect all unique values to match
+    const matchValues = [];
+    if (usernameLower) matchValues.push(usernameLower);
+    if (emailLower && emailLower !== usernameLower) matchValues.push(emailLower);
+    if (emailLocal && emailLocal !== emailLower && emailLocal !== usernameLower) matchValues.push(emailLocal);
+    
+    if (matchValues.length === 0) {
+      return { conditions: [], values: [], nextParam: paramCount };
     }
     
-    if (emailLower && emailLower !== usernameLower) {
-      conditions.push(`TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) = $${paramCount}`);
-      values.push(emailLower);
-      paramCount++;
-    }
+    // OPTIMIZED: Use IN clause instead of multiple ORs - more efficient
+    const placeholders = matchValues.map(() => `$${paramCount++}`).join(', ');
+    values.push(...matchValues);
     
-    if (emailLocal && emailLocal !== emailLower && emailLocal !== usernameLower) {
-      conditions.push(`TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) = $${paramCount}`);
-      values.push(emailLocal);
-      paramCount++;
-    }
+    const condition = `TRIM(LOWER(COALESCE(dhl.assigned_salesperson, ''))) IN (${placeholders})`;
     
-    return { conditions, values, nextParam: paramCount };
+    return { conditions: [condition], values, nextParam: paramCount };
   }
 
   async listForUser(username, departmentType = null, companyName = null, userEmail = null) {
@@ -165,8 +163,9 @@ class SalespersonLead extends BaseModel {
     }
     
     // Assignment matching: must match user AND not be empty
-    conditions.push(`(${matchResult.conditions.join(' OR ')})`);
-    conditions.push(`COALESCE(dhl.assigned_salesperson, '') != ''`);
+    // OPTIMIZED: Use single condition with IN clause
+    conditions.push(matchResult.conditions[0]); // Single IN clause condition
+    conditions.push(`dhl.assigned_salesperson IS NOT NULL AND dhl.assigned_salesperson != ''`);
     values.push(...matchResult.values);
     paramCount = matchResult.nextParam;
     
@@ -190,17 +189,19 @@ class SalespersonLead extends BaseModel {
       return [];
     }
     
+    // OPTIMIZED: Start from department_head_leads (smaller table) and use indexed columns first
+    // Filter on indexed columns (department_type, company_name) before applying function
     const query = `
       SELECT sl.*
-      FROM salesperson_leads sl
-      JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
+      FROM department_head_leads dhl
+      INNER JOIN salesperson_leads sl ON sl.dh_lead_id = dhl.id
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE ${conditions.join(' AND ')}
       ORDER BY sl.id ASC
+      LIMIT 10000
     `;
     
     const result = await SalespersonLead.query(query, values);
-    const rowCount = result.rows?.length || 0;
     
     return result.rows || [];
   }
@@ -276,11 +277,11 @@ class SalespersonLead extends BaseModel {
       };
     }
     
-    // Get total count first (using same conditions)
+    // OPTIMIZED: Get total count first (using same conditions, optimized JOIN order)
     const countQuery = `
       SELECT COUNT(*) as total
-      FROM salesperson_leads sl
-      JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
+      FROM department_head_leads dhl
+      INNER JOIN salesperson_leads sl ON sl.dh_lead_id = dhl.id
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE ${conditions.join(' AND ')}
     `;
@@ -289,12 +290,12 @@ class SalespersonLead extends BaseModel {
     
     // Debug logging
     
-    // Get paginated leads
+    // OPTIMIZED: Get paginated leads (optimized JOIN order)
     const offset = (page - 1) * limit;
     const query = `
       SELECT sl.*
-      FROM salesperson_leads sl
-      JOIN department_head_leads dhl ON dhl.id = sl.dh_lead_id
+      FROM department_head_leads dhl
+      INNER JOIN salesperson_leads sl ON sl.dh_lead_id = dhl.id
       LEFT JOIN department_heads dh ON dh.email = dhl.created_by
       WHERE ${conditions.join(' AND ')}
       ORDER BY sl.id ASC

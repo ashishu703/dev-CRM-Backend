@@ -90,6 +90,35 @@ class EnquiryController extends BaseController {
       return { message: 'Enquiry deleted successfully' };
     }, 'Enquiry deleted successfully', 'Failed to delete enquiry');
   }
+
+  /**
+   * Get all enquiries for SuperAdmin (all companies)
+   */
+  static async getAllForSuperAdmin(req, res) {
+    await BaseController.handleAsyncOperation(res, async () => {
+      const { page = 1, limit = 50, startDate, endDate, enquiryDate } = req.query;
+
+      const filters = {
+        startDate: startDate || null,
+        endDate: endDate || null,
+        enquiryDate: enquiryDate || null
+      };
+
+      const pagination = { page: parseInt(page), limit: parseInt(limit) };
+
+      // Get grouped by date for better organization
+      const grouped = await Enquiry.getGroupedByDateForSuperAdmin(filters);
+
+      // Also get paginated data
+      const paginated = await Enquiry.getAllForSuperAdmin(filters, pagination);
+
+      return {
+        enquiries: paginated.data,
+        groupedByDate: grouped,
+        pagination: paginated.pagination
+      };
+    }, 'Enquiries retrieved successfully', 'Failed to get enquiries');
+  }
 }
 
 module.exports = EnquiryController;
