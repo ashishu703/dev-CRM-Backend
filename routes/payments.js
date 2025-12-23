@@ -23,6 +23,7 @@ router.get('/customer/:customerId', paymentController.getByCustomer);
 router.get('/summary/customer/:customerId', paymentController.getPaymentSummary);
 router.get('/summary/quotation/:quotationId', paymentController.getPaymentSummaryByQuotation);
 router.get('/credit/:customerId', paymentController.getCustomerCredit);
+router.get('/installment-breakdown/quotation/:quotationId', paymentController.getInstallmentBreakdown);
 
 // Payment workflow routes
 router.put('/:id/approval', paymentController.updateApprovalStatus);

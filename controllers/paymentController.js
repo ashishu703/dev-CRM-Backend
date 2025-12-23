@@ -427,10 +427,12 @@ class PaymentController {
       if (search) {
         paramCount++;
         whereClause += ` AND (
-          customer_name ILIKE $${paramCount} OR 
-          product_name ILIKE $${paramCount} OR 
-          lead_id::text ILIKE $${paramCount} OR
-          payment_reference ILIKE $${paramCount}
+          ph.customer_name ILIKE $${paramCount} OR 
+          ph.product_name ILIKE $${paramCount} OR 
+          ph.lead_id::text ILIKE $${paramCount} OR
+          ph.payment_reference ILIKE $${paramCount} OR
+          q.quotation_number ILIKE $${paramCount} OR
+          q.customer_name ILIKE $${paramCount}
         )`;
         values.push(`%${search}%`);
       }
@@ -447,8 +449,12 @@ class PaymentController {
         values.push(new Date(endDate));
       }
 
-      // Get total count
-      const countQuery = `SELECT COUNT(*) FROM payment_history ph ${whereClause}`;
+      // Get total count - need to join quotations if search includes quotation fields
+      let countQuery = `SELECT COUNT(DISTINCT ph.id) FROM payment_history ph`;
+      if (search && (whereClause.includes('q.quotation_number') || whereClause.includes('q.customer_name'))) {
+        countQuery += ` LEFT JOIN quotations q ON ph.quotation_id::text = q.id::text`;
+      }
+      countQuery += ` ${whereClause}`;
       const countResult = await query(countQuery, values);
       const totalCount = parseInt(countResult.rows[0].count);
 
@@ -847,6 +853,157 @@ class PaymentController {
       res.status(500).json({
         success: false,
         message: 'Failed to fetch payment',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Get detailed installment breakdown for a quotation
+   * Returns all installments with ledger balance, paid amount, remaining balance for each
+   */
+  async getInstallmentBreakdown(req, res) {
+    const client = await getClient();
+    try {
+      const { quotationId } = req.params;
+
+      // Get quotation details
+      const quotRes = await client.query(
+        'SELECT id, quotation_number, total_amount, customer_id FROM quotations WHERE id = $1',
+        [quotationId]
+      );
+
+      if (quotRes.rows.length === 0) {
+        client.release();
+        return res.status(404).json({
+          success: false,
+          message: 'Quotation not found'
+        });
+      }
+
+      const quotation = quotRes.rows[0];
+      const quotationTotal = Number(quotation.total_amount || 0);
+
+      // Get all payments for this quotation (including pending, approved, rejected)
+      const paymentsRes = await client.query(
+        `SELECT 
+          ph.id,
+          ph.installment_number,
+          ph.installment_amount,
+          ph.paid_amount,
+          ph.remaining_amount,
+          ph.payment_date,
+          ph.payment_method,
+          ph.payment_reference,
+          ph.approval_status,
+          ph.payment_status,
+          ph.overpaid_amount,
+          ph.available_credit,
+          ph.remarks,
+          ph.approval_notes,
+          ph.payment_receipt_url,
+          ph.created_at,
+          ph.updated_at
+        FROM payment_history ph
+        WHERE ph.quotation_id::text = $1::text AND ph.is_refund = false
+        ORDER BY ph.installment_number ASC, ph.payment_date ASC, ph.created_at ASC`,
+        [quotationId]
+      );
+
+      const allPayments = paymentsRes.rows;
+      
+      // Calculate cumulative totals and ledger balance for each installment
+      let cumulativePaid = 0;
+      let cumulativeApproved = 0;
+      
+      const installments = allPayments.map((payment, index) => {
+        const installmentAmount = Number(payment.installment_amount || 0);
+        const isApproved = (payment.approval_status || '').toLowerCase() === 'approved';
+        
+        // Ledger balance before this installment (based on approved payments only)
+        const ledgerBalanceBefore = Math.max(0, quotationTotal - cumulativeApproved);
+        
+        // If approved, add to cumulative approved
+        if (isApproved) {
+          cumulativeApproved += installmentAmount;
+        }
+        
+        // Cumulative paid (all payments regardless of approval)
+        cumulativePaid += installmentAmount;
+        
+        // Ledger balance after this installment (based on approved payments only)
+        const ledgerBalanceAfter = Math.max(0, quotationTotal - cumulativeApproved);
+        
+        // Remaining balance after this installment
+        const remainingAfterThis = ledgerBalanceAfter;
+        
+        return {
+          installment_number: payment.installment_number || index + 1,
+          payment_id: payment.id,
+          installment_amount: installmentAmount,
+          payment_date: payment.payment_date,
+          payment_method: payment.payment_method,
+          payment_reference: payment.payment_reference,
+          approval_status: payment.approval_status || 'pending',
+          payment_status: payment.payment_status || 'pending',
+          ledger_balance_before: ledgerBalanceBefore,
+          ledger_balance_after: ledgerBalanceAfter,
+          cumulative_paid: cumulativePaid,
+          cumulative_approved: cumulativeApproved,
+          remaining_balance: remainingAfterThis,
+          overpaid_amount: Number(payment.overpaid_amount || 0),
+          available_credit: Number(payment.available_credit || 0),
+          remarks: payment.remarks,
+          approval_notes: payment.approval_notes,
+          payment_receipt_url: payment.payment_receipt_url,
+          created_at: payment.created_at,
+          updated_at: payment.updated_at
+        };
+      });
+
+      // Calculate summary
+      const totalInstallments = installments.length;
+      const approvedInstallments = installments.filter(i => i.approval_status === 'approved').length;
+      const pendingInstallments = installments.filter(i => i.approval_status === 'pending').length;
+      const rejectedInstallments = installments.filter(i => i.approval_status === 'rejected').length;
+      
+      const totalPaid = cumulativePaid;
+      const totalApproved = cumulativeApproved;
+      const finalRemaining = Math.max(0, quotationTotal - totalApproved);
+      const totalOverpaid = installments.reduce((sum, i) => sum + i.overpaid_amount, 0);
+
+      client.release();
+
+      res.json({
+        success: true,
+        data: {
+          quotation: {
+            id: quotation.id,
+            quotation_number: quotation.quotation_number,
+            total_amount: quotationTotal,
+            customer_id: quotation.customer_id
+          },
+          summary: {
+            total_quotation_amount: quotationTotal,
+            total_installments: totalInstallments,
+            approved_installments: approvedInstallments,
+            pending_installments: pendingInstallments,
+            rejected_installments: rejectedInstallments,
+            total_paid_all: totalPaid,
+            total_approved: totalApproved,
+            remaining_balance: finalRemaining,
+            total_overpaid: totalOverpaid,
+            payment_status: finalRemaining <= 0 ? 'fully_paid' : (totalApproved > 0 ? 'partially_paid' : 'unpaid')
+          },
+          installments: installments
+        }
+      });
+    } catch (error) {
+      client.release();
+      console.error('Error fetching installment breakdown:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch installment breakdown',
         error: error.message
       });
     }

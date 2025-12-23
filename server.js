@@ -29,6 +29,7 @@ const workOrderRoutes = require('./routes/workOrders');
 const marketingRoutes = require('./routes/marketing');
 const organizationRoutes = require('./routes/organizations');
 const tradeIndiaRoutes = require('./routes/tradeIndia');
+const reportsRoutes = require('./routes/reports');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -170,6 +171,7 @@ app.use('/api/work-orders', workOrderRoutes);
 app.use('/api/marketing', marketingRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/tradeindia', tradeIndiaRoutes);
+app.use('/api/reports', reportsRoutes);
 app.use('/api/admin', adminRoutes);
 
 // 404 handler

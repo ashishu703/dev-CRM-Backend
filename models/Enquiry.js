@@ -272,6 +272,125 @@ class Enquiry extends BaseModel {
    * @param {Object} filters - Filter options
    * @returns {Promise<Object>} Enquiries grouped by date
    */
+  async getAllForSuperAdmin(filters = {}, pagination = {}) {
+    await this.ensureSchema();
+    
+    const { page = 1, limit = 50 } = pagination;
+    const offset = (page - 1) * limit;
+    
+    const whereConditions = [];
+    const values = [];
+    let paramCount = 1;
+
+    // SuperAdmin can see all enquiries - no department filter
+    // But can filter by date range
+    if (filters.startDate) {
+      whereConditions.push(`enquiry_date >= $${paramCount++}`);
+      values.push(filters.startDate);
+    }
+    if (filters.endDate) {
+      whereConditions.push(`enquiry_date <= $${paramCount++}`);
+      values.push(filters.endDate);
+    }
+    if (filters.enquiryDate) {
+      whereConditions.push(`enquiry_date = $${paramCount++}`);
+      values.push(filters.enquiryDate);
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+    
+    const countQuery = `SELECT COUNT(*) FROM enquiries ${whereClause}`;
+    const countResult = await Enquiry.query(countQuery, values);
+    const total = parseInt(countResult.rows[0].count);
+
+    const query = `
+      SELECT * FROM enquiries
+      ${whereClause}
+      ORDER BY enquiry_date DESC, created_at DESC
+      LIMIT $${paramCount++} OFFSET $${paramCount++}
+    `;
+    values.push(limit, offset);
+
+    const result = await Enquiry.query(query, values);
+    
+    return {
+      data: result.rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  }
+
+  async getGroupedByDateForSuperAdmin(filters = {}) {
+    await this.ensureSchema();
+    
+    const whereConditions = [];
+    const values = [];
+    let paramCount = 1;
+
+    // SuperAdmin can see all enquiries - no department filter
+    // But can filter by date range
+    if (filters.startDate) {
+      whereConditions.push(`enquiry_date >= $${paramCount++}`);
+      values.push(filters.startDate);
+    }
+    if (filters.endDate) {
+      whereConditions.push(`enquiry_date <= $${paramCount++}`);
+      values.push(filters.endDate);
+    }
+    if (filters.enquiryDate) {
+      whereConditions.push(`enquiry_date = $${paramCount++}`);
+      values.push(filters.enquiryDate);
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+    const query = `
+      SELECT 
+        enquiry_date,
+        COUNT(*) as count,
+        json_agg(
+          json_build_object(
+            'id', id,
+            'lead_id', lead_id,
+            'customer_name', customer_name,
+            'business', business,
+            'address', address,
+            'state', state,
+            'division', division,
+            'follow_up_status', follow_up_status,
+            'follow_up_remark', follow_up_remark,
+            'sales_status', sales_status,
+            'sales_status_remark', sales_status_remark,
+            'enquired_product', enquired_product,
+            'product_quantity', product_quantity,
+            'product_remark', product_remark,
+            'salesperson', salesperson,
+            'telecaller', telecaller,
+            'enquiry_date', enquiry_date,
+            'created_at', created_at,
+            'updated_at', updated_at
+          ) ORDER BY created_at DESC
+        ) as enquiries
+      FROM enquiries
+      ${whereClause}
+      GROUP BY enquiry_date
+      ORDER BY enquiry_date DESC
+    `;
+
+    const result = await Enquiry.query(query, values);
+    
+    const grouped = {};
+    result.rows.forEach(row => {
+      grouped[row.enquiry_date] = row.enquiries;
+    });
+    
+    return grouped;
+  }
+
   async getGroupedByDate(filters = {}) {
     await this.ensureSchema();
     

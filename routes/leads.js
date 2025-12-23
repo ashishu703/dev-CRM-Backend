@@ -60,6 +60,7 @@ router.put(
 
 // Enquiry routes for department head
 router.get('/enquiries/department-head', EnquiryController.getForDepartmentHead);
+router.get('/enquiries/superadmin', EnquiryController.getAllForSuperAdmin);
 router.put('/enquiries/:id', validateRequest(idParamSchema, 'params'), EnquiryController.update);
 router.delete('/enquiries/:id', validateRequest(idParamSchema, 'params'), EnquiryController.delete);
 
