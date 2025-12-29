@@ -455,6 +455,12 @@ class SalespersonLeadController {
         try {
           const Enquiry = require('../models/Enquiry');
           
+          // Check if enquiries already exist for this lead
+          const existingEnquiries = await Enquiry.query(
+            'SELECT id, enquiry_date FROM enquiries WHERE lead_id = $1 LIMIT 1',
+            [id]
+          );
+          
           // Get lead data from both salesperson and department head tables
           const spLead = result?.row || {};
           const dhLead = dhRow || {};
@@ -463,30 +469,90 @@ class SalespersonLeadController {
           const assignedSalesperson = dhLead.assigned_salesperson || username || null;
           const assignedTelecaller = dhLead.assigned_telecaller || null;
           
-          const enquiryData = {
-            lead_id: id,
-            customer_name: spLead.name || dhLead.customer || updatePayload.name || '',
-            business: spLead.business || dhLead.business || updatePayload.business || null,
-            address: spLead.address || dhLead.address || updatePayload.address || null,
-            state: spLead.state || dhLead.state || updatePayload.state || null,
-            division: spLead.division || dhLead.division || updatePayload.division || null,
-            follow_up_status: updatePayload.follow_up_status || null,
-            follow_up_remark: updatePayload.follow_up_remark || null,
-            sales_status: updatePayload.sales_status || null,
-            sales_status_remark: updatePayload.sales_status_remark || null,
-            enquired_products: updatePayload.enquired_products,
-            other_product: updatePayload.other_product || null,
-            salesperson: assignedSalesperson,
-            telecaller: assignedTelecaller,
-            enquiry_date: updatePayload.follow_up_date || new Date().toISOString().split('T')[0]
-          };
-          
-          const createdEnquiries = await Enquiry.createEnquiries(enquiryData);
-          if (createdEnquiries && createdEnquiries.length > 0) {
-            console.log(`Created ${createdEnquiries.length} enquiry records for lead ${id}`);
+          // If enquiries already exist, update them instead of creating new ones
+          if (existingEnquiries.rows && existingEnquiries.rows.length > 0) {
+            // Update existing enquiries - preserve original enquiry_date
+            const existingEnquiry = existingEnquiries.rows[0];
+            const originalEnquiryDate = existingEnquiry.enquiry_date;
+            
+            // Update all enquiries for this lead with new data, but preserve enquiry_date
+            const updateData = {
+              follow_up_status: updatePayload.follow_up_status || null,
+              follow_up_remark: updatePayload.follow_up_remark || null,
+              sales_status: updatePayload.sales_status || null,
+              sales_status_remark: updatePayload.sales_status_remark || null,
+              customer_name: spLead.name || dhLead.customer || updatePayload.name || null,
+              business: spLead.business || dhLead.business || updatePayload.business || null,
+              address: spLead.address || dhLead.address || updatePayload.address || null,
+              state: spLead.state || dhLead.state || updatePayload.state || null,
+              division: spLead.division || dhLead.division || updatePayload.division || null,
+              salesperson: assignedSalesperson,
+              telecaller: assignedTelecaller
+            };
+            
+            // Update all enquiries for this lead
+            await Enquiry.query(
+              `UPDATE enquiries 
+               SET follow_up_status = $1, 
+                   follow_up_remark = $2, 
+                   sales_status = $3, 
+                   sales_status_remark = $4,
+                   customer_name = COALESCE($5, customer_name),
+                   business = COALESCE($6, business),
+                   address = COALESCE($7, address),
+                   state = COALESCE($8, state),
+                   division = COALESCE($9, division),
+                   salesperson = COALESCE($10, salesperson),
+                   telecaller = COALESCE($11, telecaller),
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE lead_id = $12`,
+              [
+                updateData.follow_up_status,
+                updateData.follow_up_remark,
+                updateData.sales_status,
+                updateData.sales_status_remark,
+                updateData.customer_name,
+                updateData.business,
+                updateData.address,
+                updateData.state,
+                updateData.division,
+                updateData.salesperson,
+                updateData.telecaller,
+                id
+              ]
+            );
+            
+            console.log(`Updated existing enquiry records for lead ${id} (preserved original enquiry_date: ${originalEnquiryDate})`);
+          } else {
+            // Create new enquiries - use lead's date, not follow_up_date
+            // Use the lead's original date from department head table or salesperson table
+            const leadDate = dhLead.date || spLead.date || updatePayload.date || new Date().toISOString().split('T')[0];
+            
+            const enquiryData = {
+              lead_id: id,
+              customer_name: spLead.name || dhLead.customer || updatePayload.name || '',
+              business: spLead.business || dhLead.business || updatePayload.business || null,
+              address: spLead.address || dhLead.address || updatePayload.address || null,
+              state: spLead.state || dhLead.state || updatePayload.state || null,
+              division: spLead.division || dhLead.division || updatePayload.division || null,
+              follow_up_status: updatePayload.follow_up_status || null,
+              follow_up_remark: updatePayload.follow_up_remark || null,
+              sales_status: updatePayload.sales_status || null,
+              sales_status_remark: updatePayload.sales_status_remark || null,
+              enquired_products: updatePayload.enquired_products,
+              other_product: updatePayload.other_product || null,
+              salesperson: assignedSalesperson,
+              telecaller: assignedTelecaller,
+              enquiry_date: leadDate // Use lead's original date, NOT follow_up_date
+            };
+            
+            const createdEnquiries = await Enquiry.createEnquiries(enquiryData);
+            if (createdEnquiries && createdEnquiries.length > 0) {
+              console.log(`Created ${createdEnquiries.length} enquiry records for lead ${id} with enquiry_date: ${leadDate}`);
+            }
           }
         } catch (e) {
-          console.error('Enquiry creation failed:', e);
+          console.error('Enquiry creation/update failed:', e);
           // Don't fail the entire update if enquiry creation fails
         }
       }
