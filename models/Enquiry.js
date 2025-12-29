@@ -6,13 +6,111 @@ class Enquiry extends BaseModel {
   }
 
   async ensureSchema() {
-    const sql = `
-      DO $do$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'enquiries'
-        ) THEN
-          CREATE TABLE enquiries (
+    // Fast path: Check if table already exists to avoid unnecessary work
+    const checkTable = await Enquiry.query(`
+      SELECT 1 FROM information_schema.tables 
+      WHERE table_schema = 'public' AND table_name = 'enquiries'
+      LIMIT 1
+    `);
+    
+    // Helper function to ensure trigger exists (with retry logic for concurrent access)
+    const ensureTrigger = async (maxRetries = 3) => {
+      let attempt = 0;
+      while (attempt < maxRetries) {
+        try {
+          // Use DO block to make trigger creation idempotent and handle concurrent access
+          await Enquiry.query(`
+            DO $do$
+            BEGIN
+              -- Create or replace function (idempotent)
+              CREATE OR REPLACE FUNCTION update_enquiries_updated_at()
+              RETURNS TRIGGER AS $enq$
+              BEGIN
+                NEW.updated_at = CURRENT_TIMESTAMP;
+                RETURN NEW;
+              END;
+              $enq$ LANGUAGE plpgsql;
+              
+              -- Drop trigger if exists (idempotent)
+              DROP TRIGGER IF EXISTS trg_enquiries_updated_at ON enquiries;
+              
+              -- Create trigger only if it doesn't exist (check in DO block to avoid race condition)
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_trigger 
+                WHERE tgname = 'trg_enquiries_updated_at' 
+                AND tgrelid = 'enquiries'::regclass
+              ) THEN
+                CREATE TRIGGER trg_enquiries_updated_at
+                BEFORE UPDATE ON enquiries
+                FOR EACH ROW EXECUTE FUNCTION update_enquiries_updated_at();
+              END IF;
+            EXCEPTION WHEN OTHERS THEN
+              -- If trigger already exists or other error, ignore (another process may have created it)
+              NULL;
+            END
+            $do$;
+          `);
+          return; // Success
+        } catch (error) {
+          const isConcurrentError = error.message && (
+            error.message.includes('concurrently updated') ||
+            error.message.includes('could not serialize') ||
+            error.message.includes('deadlock detected') ||
+            error.message.includes('already exists')
+          );
+          
+          if (isConcurrentError && attempt < maxRetries - 1) {
+            attempt++;
+            await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
+            continue;
+          }
+          
+          // If it's a "trigger already exists" or "already exists" error, that's fine - ignore it
+          if (error.message && (error.message.includes('already exists') || error.message.includes('duplicate'))) {
+            return;
+          }
+          
+          // For other errors on last attempt, check if trigger exists
+          if (attempt >= maxRetries - 1) {
+            try {
+              const triggerCheck = await Enquiry.query(`
+                SELECT 1 FROM pg_trigger 
+                WHERE tgname = 'trg_enquiries_updated_at' 
+                AND tgrelid = 'enquiries'::regclass
+                LIMIT 1
+              `);
+              if (triggerCheck.rows.length > 0) {
+                return; // Trigger exists, that's fine
+              }
+            } catch (checkErr) {
+              // Ignore check errors
+            }
+          }
+          
+          // If not a concurrent error or max retries, throw
+          if (!isConcurrentError) {
+            throw error;
+          }
+        }
+      }
+    };
+    
+    if (checkTable.rows.length > 0) {
+      // Table exists, just ensure trigger exists
+      await ensureTrigger();
+      return;
+    }
+
+    // Table doesn't exist, create it with retry logic for concurrent access
+    const maxRetries = 3;
+    let attempt = 0;
+    
+    while (attempt < maxRetries) {
+      try {
+        // Use CREATE TABLE IF NOT EXISTS which is atomic in PostgreSQL
+        // This prevents "tuple concurrently updated" errors
+        const sql = `
+          CREATE TABLE IF NOT EXISTS enquiries (
             id SERIAL PRIMARY KEY,
             lead_id INTEGER NOT NULL,
             customer_name VARCHAR(255) NOT NULL,
@@ -38,25 +136,55 @@ class Enquiry extends BaseModel {
           CREATE INDEX IF NOT EXISTS idx_enquiries_enquiry_date ON enquiries(enquiry_date);
           CREATE INDEX IF NOT EXISTS idx_enquiries_salesperson ON enquiries(salesperson);
           CREATE INDEX IF NOT EXISTS idx_enquiries_telecaller ON enquiries(telecaller);
-        END IF;
-      EXCEPTION WHEN OTHERS THEN NULL;
-      END
-      $do$;
-      
-      CREATE OR REPLACE FUNCTION update_enquiries_updated_at()
-      RETURNS TRIGGER AS $enq$
-      BEGIN
-        NEW.updated_at = CURRENT_TIMESTAMP;
-        RETURN NEW;
-      END;
-      $enq$ LANGUAGE plpgsql;
-      
-      DROP TRIGGER IF EXISTS trg_enquiries_updated_at ON enquiries;
-      CREATE TRIGGER trg_enquiries_updated_at
-      BEFORE UPDATE ON enquiries
-      FOR EACH ROW EXECUTE FUNCTION update_enquiries_updated_at();
-    `;
-    await Enquiry.query(sql);
+        `;
+        await Enquiry.query(sql);
+        
+        // Ensure trigger after table creation (with retry logic)
+        await ensureTrigger();
+        return; // Success
+      } catch (error) {
+        // If it's a "tuple concurrently updated" or similar concurrent error, retry
+        const isConcurrentError = error.message && (
+          error.message.includes('concurrently updated') ||
+          error.message.includes('could not serialize') ||
+          error.message.includes('deadlock detected')
+        );
+        
+        if (isConcurrentError && attempt < maxRetries - 1) {
+          attempt++;
+          // Exponential backoff: 50ms, 100ms, 200ms
+          await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, attempt - 1)));
+          
+          // Re-check if table was created by another process
+          const recheck = await Enquiry.query(`
+            SELECT 1 FROM information_schema.tables 
+            WHERE table_schema = 'public' AND table_name = 'enquiries'
+            LIMIT 1
+          `);
+          if (recheck.rows.length > 0) {
+            // Table was created by another process, ensure trigger and return
+            await ensureTrigger();
+            return;
+          }
+          continue; // Retry
+        }
+        
+        // For other errors or max retries reached, check if table exists now
+        const finalCheck = await Enquiry.query(`
+          SELECT 1 FROM information_schema.tables 
+          WHERE table_schema = 'public' AND table_name = 'enquiries'
+          LIMIT 1
+        `);
+        if (finalCheck.rows.length > 0) {
+          // Table exists, ensure trigger and return (success)
+          await ensureTrigger();
+          return;
+        }
+        
+        // If table still doesn't exist and we've exhausted retries, throw
+        throw error;
+      }
+    }
   }
 
   /**
@@ -447,11 +575,13 @@ class Enquiry extends BaseModel {
   async updateById(id, updateData) {
     await this.ensureSchema();
     
+    // enquiry_date should never be updated once set - preserve original date
     const allowedFields = [
       'customer_name', 'business', 'address', 'state', 'division',
       'follow_up_status', 'follow_up_remark', 'sales_status', 'sales_status_remark',
       'enquired_product', 'product_quantity', 'product_remark',
-      'salesperson', 'telecaller', 'enquiry_date'
+      'salesperson', 'telecaller'
+      // NOTE: enquiry_date is intentionally excluded - it should remain fixed once created
     ];
 
     const fields = [];
@@ -459,6 +589,12 @@ class Enquiry extends BaseModel {
     let paramCount = 1;
 
     Object.entries(updateData).forEach(([key, value]) => {
+      // Explicitly prevent enquiry_date from being updated
+      if (key === 'enquiry_date') {
+        console.warn(`Attempted to update enquiry_date for enquiry ${id} - this field is protected and will be ignored`);
+        return;
+      }
+      
       if (allowedFields.includes(key) && value !== undefined) {
         fields.push(`${key} = $${paramCount++}`);
         values.push(value === '' ? null : value);

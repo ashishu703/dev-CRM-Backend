@@ -3,50 +3,36 @@ const DepartmentHead = require('../models/DepartmentHead');
 const BaseController = require('./BaseController');
 const TargetCalculationService = require('../services/targetCalculationService');
 const DepartmentCleanupService = require('../services/departmentCleanupService');
+const UserLeadAssignmentService = require('../services/userLeadAssignmentService');
 
 class DepartmentUserController extends BaseController {
-  /**
-   * Recalculate and enrich user target data (DRY principle)
-   * @private
-   * @param {Object} userJson - User JSON object
-   * @returns {Promise<Object>} Enriched user object with calculated targets
-   */
   static async _enrichUserTargetData(userJson) {
     const targetStartDate = userJson.target_start_date || userJson.targetStartDate;
     const targetEndDate = userJson.target_end_date || userJson.targetEndDate;
     const startDateStr = targetStartDate ? new Date(targetStartDate).toISOString().split('T')[0] : null;
     const endDateStr = targetEndDate ? new Date(targetEndDate).toISOString().split('T')[0] : null;
     
-    // Recalculate achieved_target and due payment using target date range
     const [recalculatedAchieved, duePayment] = await Promise.all([
       TargetCalculationService.calculateAchievedTarget(userJson.id, startDateStr, endDateStr),
       TargetCalculationService.calculateDuePayment(userJson.id, startDateStr, endDateStr)
     ]);
     
-    // Ensure achieved_target is a valid non-negative number (already rounded to 2 decimals in service)
     const target = parseFloat(userJson.target || 0);
-    const achieved = Number.isFinite(recalculatedAchieved) && recalculatedAchieved >= 0 
-      ? recalculatedAchieved 
-      : 0;
+    const achieved = Number.isFinite(recalculatedAchieved) && recalculatedAchieved >= 0 ? recalculatedAchieved : 0;
     
-    // Set achieved_target (always non-negative, rounded to 2 decimals)
     userJson.achieved_target = Math.round(achieved * 100) / 100;
     userJson.achievedTarget = userJson.achieved_target;
     
-    // Calculate remaining target (clamp to 0 if negative, round to 2 decimals)
     const remaining = target - achieved;
     userJson.remaining_target = remaining > 0 ? Math.round(remaining * 100) / 100 : 0;
     
-    // Set due payment (already rounded to 2 decimals in service)
     userJson.due_payment = duePayment;
     userJson.duePayment = duePayment;
     
-    // Optional: track extra achieved if target is exceeded
     if (remaining < 0) {
       userJson.extra_achieved = Math.round(Math.abs(remaining) * 100) / 100;
     }
     
-    // Ensure camelCase fields are present for frontend compatibility
     userJson.isActive = userJson.is_active !== undefined ? userJson.is_active : userJson.isActive;
     userJson.departmentType = userJson.department_type || userJson.departmentType;
     userJson.lastLogin = userJson.last_login || userJson.lastLogin;
@@ -60,21 +46,14 @@ class DepartmentUserController extends BaseController {
       
       BaseController.validateRequiredFields(['username', 'email', 'password', 'target'], req.body);
       
-      // Only check for active users - deleted users should not block new creation
       const existingUser = await DepartmentUser.findByEmail(email);
-      if (existingUser) {
-        // Double check if user is actually active (safety check)
-        if (existingUser.is_active !== false) {
-          throw new Error('User with this email already exists');
-        }
+      if (existingUser && existingUser.is_active !== false) {
+        throw new Error('User with this email already exists');
       }
 
       const existingUsername = await DepartmentUser.findByUsername(username);
-      if (existingUsername) {
-        // Double check if user is actually active (safety check)
-        if (existingUsername.is_active !== false) {
-          throw new Error('User with this username already exists');
-        }
+      if (existingUsername && existingUsername.is_active !== false) {
+        throw new Error('User with this username already exists');
       }
 
       let headUser = null;
@@ -93,7 +72,6 @@ class DepartmentUserController extends BaseController {
         throw new Error('Head user must be from the same department');
       }
 
-      // Validate target distribution: sum of all user targets should not exceed department head target
       const userTarget = parseFloat(target || 0);
       const existingUsers = await DepartmentUser.getByHeadUserId(headUser.id);
       const totalDistributedTarget = existingUsers.reduce((sum, user) => sum + parseFloat(user.target || 0), 0);
@@ -104,7 +82,6 @@ class DepartmentUserController extends BaseController {
         throw new Error(`Target exceeds available limit. Department head target: ₹${headTarget.toLocaleString('en-IN')}, Already distributed: ₹${totalDistributedTarget.toLocaleString('en-IN')}, Remaining: ₹${remainingTarget.toLocaleString('en-IN')}. You are trying to assign: ₹${userTarget.toLocaleString('en-IN')}`);
       }
 
-      // Validate target start date - must match department head's target start date
       if (req.body.targetStartDate !== undefined) {
         const userStartDate = new Date(req.body.targetStartDate).toISOString().split('T')[0];
         const headStartDate = headUser.target_start_date 
@@ -116,30 +93,31 @@ class DepartmentUserController extends BaseController {
         }
       }
       
-      // Validate target period - user's target period must exactly match department head's remaining period
       if (req.body.targetDurationDays !== undefined) {
         const userTargetDuration = parseInt(req.body.targetDurationDays);
+        let departmentHeadRemainingDays = 30;
         
-        // Calculate department head's remaining days (month end logic)
-        let departmentHeadRemainingDays = 30; // Default if no target_start_date
         if (headUser.target_start_date) {
           const startDate = new Date(headUser.target_start_date);
           const now = new Date();
-          
-          // Calculate month end from start date
           const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
           monthEnd.setHours(23, 59, 59, 999);
           
-          // Calculate days remaining until month end
           if (monthEnd < now) {
             departmentHeadRemainingDays = 0;
           } else {
-            const diffTime = monthEnd - now;
-            departmentHeadRemainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const endDay = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), monthEnd.getDate());
+            
+            if (endDay < today) {
+              departmentHeadRemainingDays = 0;
+            } else {
+              const diffTime = endDay - today;
+              departmentHeadRemainingDays = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24)));
+            }
           }
         }
         
-        // Enforce exact match - user's target duration must exactly equal department head's remaining days
         if (userTargetDuration !== departmentHeadRemainingDays) {
           throw new Error(`Target duration must exactly match department head's remaining target period. Required: ${departmentHeadRemainingDays} days, Provided: ${userTargetDuration} days`);
         }
@@ -214,30 +192,20 @@ class DepartmentUserController extends BaseController {
       if (!user) throw new Error('Department user not found');
 
       if (updateData.email && updateData.email !== user.email) {
-        // Only check for active users - deleted users should not block updates
         const existingUser = await DepartmentUser.findByEmail(updateData.email);
-        if (existingUser && existingUser.id !== user.id) {
-          // Double check if user is actually active (safety check)
-          if (existingUser.is_active !== false) {
-            throw new Error('User with this email already exists');
-          }
+        if (existingUser && existingUser.id !== user.id && existingUser.is_active !== false) {
+          throw new Error('User with this email already exists');
         }
       }
 
       if (updateData.username && updateData.username !== user.username) {
-        // Only check for active users - deleted users should not block updates
         const existingUsername = await DepartmentUser.findByUsername(updateData.username);
-        if (existingUsername && existingUsername.id !== user.id) {
-          // Double check if user is actually active (safety check)
-          if (existingUsername.is_active !== false) {
-            throw new Error('User with this username already exists');
-          }
+        if (existingUsername && existingUsername.id !== user.id && existingUsername.is_active !== false) {
+          throw new Error('User with this username already exists');
         }
       }
 
-      // Validate head user if being updated
       let headUser = null;
-      // Get the current head_user_id (database returns snake_case)
       const currentHeadUserId = user.head_user_id || user.headUserId;
       
       if (updateData.headUserId && updateData.headUserId !== currentHeadUserId) {
@@ -258,7 +226,6 @@ class DepartmentUserController extends BaseController {
           throw new Error('Head user must be from the same department');
         }
       } else {
-        // Get the current head user
         if (!currentHeadUserId) {
           throw new Error('Department user does not have an assigned head user');
         }
@@ -266,12 +233,10 @@ class DepartmentUserController extends BaseController {
         if (!headUser) throw new Error('Head user not found');
       }
 
-      // Validate target distribution if target is being updated
       if (updateData.target !== undefined) {
         const newUserTarget = parseFloat(updateData.target || 0);
         const existingUsers = await DepartmentUser.getByHeadUserId(headUser.id);
         const totalDistributedTarget = existingUsers.reduce((sum, u) => {
-          // Exclude current user's target from the sum
           if (u.id === user.id) return sum;
           return sum + parseFloat(u.target || 0);
         }, 0);
@@ -283,7 +248,6 @@ class DepartmentUserController extends BaseController {
         }
       }
 
-      // Validate target start date - must match department head's target start date
       if (updateData.targetStartDate !== undefined) {
         const userStartDate = new Date(updateData.targetStartDate).toISOString().split('T')[0];
         const headStartDate = headUser.target_start_date 
@@ -295,36 +259,58 @@ class DepartmentUserController extends BaseController {
         }
       }
       
-      // Validate target period - user's target period must exactly match department head's remaining period
       if (updateData.targetDurationDays !== undefined) {
         const userTargetDuration = parseInt(updateData.targetDurationDays);
+        let departmentHeadRemainingDays = 30;
         
-        // Calculate department head's remaining days (month end logic)
-        let departmentHeadRemainingDays = 30; // Default if no target_start_date
         if (headUser.target_start_date) {
           const startDate = new Date(headUser.target_start_date);
           const now = new Date();
-          
-          // Calculate month end from start date
           const monthEnd = new Date(startDate.getFullYear(), startDate.getMonth() + 1, 0);
           monthEnd.setHours(23, 59, 59, 999);
           
-          // Calculate days remaining until month end
           if (monthEnd < now) {
             departmentHeadRemainingDays = 0;
           } else {
-            const diffTime = monthEnd - now;
-            departmentHeadRemainingDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const endDay = new Date(monthEnd.getFullYear(), monthEnd.getMonth(), monthEnd.getDate());
+            
+            if (endDay < today) {
+              departmentHeadRemainingDays = 0;
+            } else {
+              const diffTime = endDay - today;
+              departmentHeadRemainingDays = Math.max(0, Math.round(diffTime / (1000 * 60 * 60 * 24)));
+            }
           }
         }
         
-        // Enforce exact match - user's target duration must exactly equal department head's remaining days
         if (userTargetDuration !== departmentHeadRemainingDays) {
           throw new Error(`Target duration must exactly match department head's remaining target period. Required: ${departmentHeadRemainingDays} days, Provided: ${userTargetDuration} days`);
         }
       }
 
+      const oldUsername = user.username;
+      const oldEmail = user.email;
+      const usernameChanged = updateData.username !== undefined && updateData.username !== oldUsername;
+      const emailChanged = updateData.email !== undefined && updateData.email !== oldEmail;
+
       const updatedUser = await user.update(updateData, req.user.id);
+
+      if ((usernameChanged || emailChanged) && updatedUser) {
+        const deptType = user.department_type || user.departmentType;
+        const compName = user.company_name || user.companyName;
+        const oldEmailLocal = String(oldEmail || '').toLowerCase().includes('@')
+          ? String(oldEmail || '').toLowerCase().split('@')[0]
+          : String(oldEmail || '').toLowerCase();
+
+        await UserLeadAssignmentService.renameAssignee({
+          departmentType: deptType,
+          companyName: compName,
+          fromIdentifiers: [oldUsername, oldEmail, oldEmailLocal],
+          toUsername: updatedUser.username || updateData.username || oldUsername
+        });
+      }
+
       return { user: updatedUser.toJSON() };
     }, 'Department user updated successfully', 'Failed to update department user');
   }
@@ -346,7 +332,6 @@ class DepartmentUserController extends BaseController {
       const { headUserId } = req.params;
       const users = await DepartmentUser.getByHeadUserId(headUserId);
       
-      // Recalculate achieved_target for each user based on their target date range
       const usersWithRecalculatedTarget = await Promise.all(
         users.map(async (user) => {
           const userJson = user.toJSON();
