@@ -453,10 +453,11 @@ class SalespersonLeadController {
       // Create enquiry records if enquired_products are present
       if (updatePayload.enquired_products) {
         try {
-          const Enquiry = require('../models/Enquiry');
+          const EnquiryModel = require('../models/Enquiry');
+          const EnquiryClass = EnquiryModel.Enquiry || EnquiryModel.constructor;
           
           // Check if enquiries already exist for this lead
-          const existingEnquiries = await Enquiry.query(
+          const existingEnquiries = await EnquiryClass.query(
             'SELECT id, enquiry_date FROM enquiries WHERE lead_id = $1 LIMIT 1',
             [id]
           );
@@ -491,7 +492,7 @@ class SalespersonLeadController {
             };
             
             // Update all enquiries for this lead
-            await Enquiry.query(
+            await EnquiryClass.query(
               `UPDATE enquiries 
                SET follow_up_status = $1, 
                    follow_up_remark = $2, 
@@ -546,7 +547,7 @@ class SalespersonLeadController {
               enquiry_date: leadDate // Use lead's original date, NOT follow_up_date
             };
             
-            const createdEnquiries = await Enquiry.createEnquiries(enquiryData);
+            const createdEnquiries = await EnquiryModel.createEnquiries(enquiryData);
             if (createdEnquiries && createdEnquiries.length > 0) {
               console.log(`Created ${createdEnquiries.length} enquiry records for lead ${id} with enquiry_date: ${leadDate}`);
             }

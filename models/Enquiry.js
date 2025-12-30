@@ -647,7 +647,16 @@ class Enquiry extends BaseModel {
     
     return result.rows && result.rows.length > 0 ? result.rows[0] : null;
   }
+
+  // Instance method to access static query method
+  async query(sql, params = []) {
+    return await Enquiry.query(sql, params);
+  }
 }
 
-module.exports = new Enquiry();
+const enquiryInstance = new Enquiry();
+
+// Export both instance and class for flexibility
+module.exports = enquiryInstance;
+module.exports.Enquiry = Enquiry;
 
