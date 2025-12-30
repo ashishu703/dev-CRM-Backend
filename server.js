@@ -27,6 +27,7 @@ const securityLogRoutes = require('./routes/securityLogs');
 const stockRoutes = require('./routes/stock');
 const inventoryRoutes = require('./routes/inventory');
 const workOrderRoutes = require('./routes/workOrders');
+const salesOrderRoutes = require('./routes/salesOrders');
 const marketingRoutes = require('./routes/marketing');
 const organizationRoutes = require('./routes/organizations');
 const tradeIndiaRoutes = require('./routes/tradeIndia');
@@ -170,6 +171,7 @@ app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/work-orders', workOrderRoutes);
+app.use('/api/sales-orders', salesOrderRoutes);
 app.use('/api/marketing', marketingRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/tradeindia', tradeIndiaRoutes);
@@ -187,16 +189,77 @@ app.use('*', (req, res) => {
 // Error handling middleware
 app.use(errorHandler);
 
-// Initialize TradeIndia cron service (if enabled)
+// Initialize Socket.IO
+const server = require('http').createServer(app);
+const { Server } = require('socket.io');
+const notificationService = require('./services/notificationService');
+
+const io = new Server(server, {
+  cors: {
+    origin: (origin, callback) => {
+      const allowedOrigins = getAllowedOrigins();
+      if (allowedOrigins === true) {
+        callback(null, true);
+      } else if (Array.isArray(allowedOrigins)) {
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+          callback(null, true);
+        } else {
+          callback(new Error('Not allowed by CORS'));
+        }
+      } else {
+        callback(null, true);
+      }
+    },
+    credentials: true,
+    methods: ['GET', 'POST']
+  }
+});
+
+// Socket.IO authentication middleware
+io.use(async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return next(new Error('Authentication error: No token provided'));
+    }
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.user = decoded;
+    next();
+  } catch (error) {
+    next(new Error('Authentication error: Invalid token'));
+  }
+});
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+  const userEmail = socket.user?.email?.toLowerCase();
+  
+  if (userEmail) {
+    // Join user-specific room
+    socket.join(`user:${userEmail}`);
+    logger.info(`User ${userEmail} connected to notifications`);
+    
+    socket.on('disconnect', () => {
+      logger.info(`User ${userEmail} disconnected from notifications`);
+    });
+  }
+});
+
+notificationService.initialize(io);
+
 if (process.env.TRADEINDIA_CRON_ENABLED === 'true') {
   const tradeIndiaCronService = require('./services/tradeIndiaCronService');
   logger.info('TradeIndia cron service initialized');
 }
 
-// Start server
-app.listen(PORT, () => {
+// Start server with Socket.IO
+server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV}`);
+  logger.info('Socket.IO enabled for real-time notifications');
 });
 
 // Graceful shutdown

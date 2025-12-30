@@ -1,12 +1,12 @@
 const BaseModel = require('./BaseModel');
 const { query } = require('../config/database');
+const notificationService = require('../services/notificationService');
 
 class Quotation extends BaseModel {
   constructor() {
     super('quotations');
   }
 
-  // Create a new quotation with items
   async createWithItems(quotationData, items) {
     try {
       await query('BEGIN');
@@ -30,9 +30,6 @@ class Quotation extends BaseModel {
         ) RETURNING *
       `;
       
-      console.log('💾 Creating quotation with data:', quotationData);
-      console.log('📦 Items to save:', items);
-      
       const quotationValues = [
         quotationNumber,
         quotationData.customerId,
@@ -55,7 +52,6 @@ class Quotation extends BaseModel {
         quotationData.discountRate || 0,
         quotationData.discountAmount || 0,
         quotationData.totalAmount,
-        // New fields
         quotationData.template || null,
         quotationData.paymentMode || null,
         quotationData.transportTc || null,
@@ -67,8 +63,6 @@ class Quotation extends BaseModel {
         quotationData.billTo ? JSON.stringify(quotationData.billTo) : null,
         quotationData.remark || null
       ];
-      
-      console.log('📤 Quotation values:', quotationValues);
       
       const quotationResult = await query(quotationQuery, quotationValues);
       const quotation = quotationResult.rows[0];
@@ -113,10 +107,7 @@ class Quotation extends BaseModel {
     }
   }
 
-  // Update quotation with items
   async updateById(id, updateData) {
-    const { query } = require('../config/database');
-    
     try {
       await query('BEGIN');
       
@@ -152,7 +143,7 @@ class Quotation extends BaseModel {
         terms_sections: updateData.termsSections ? JSON.stringify(updateData.termsSections) : null,
         bill_to: updateData.billTo ? JSON.stringify(updateData.billTo) : null,
         remark: updateData.remark,
-        status: 'draft', // Reset to draft when editing
+        status: 'draft',
         updated_at: new Date().toISOString()
       };
       
@@ -210,32 +201,44 @@ class Quotation extends BaseModel {
       }
       
       await query('COMMIT');
-      
-      // Return updated quotation with items
       return await this.getWithItems(id);
     } catch (error) {
       await query('ROLLBACK');
-      console.error('Error updating quotation:', error);
       throw error;
     }
   }
 
-  // Get quotation with items
   async getWithItems(id) {
-    const quotationQuery = 'SELECT * FROM quotations WHERE id = $1';
-    const itemsQuery = 'SELECT * FROM quotation_items WHERE quotation_id = $1 ORDER BY item_order';
+    const isUUID = (str) => {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return uuidRegex.test(str);
+    };
+
+    let quotationQuery, itemsQuery;
+    if (isUUID(id)) {
+      quotationQuery = 'SELECT * FROM quotations WHERE id = $1';
+      itemsQuery = 'SELECT * FROM quotation_items WHERE quotation_id = $1 ORDER BY item_order';
+    } else {
+      quotationQuery = 'SELECT * FROM quotations WHERE quotation_number = $1';
+      const quotationResult = await query(quotationQuery, [id]);
+      if (quotationResult.rows.length === 0) return null;
+      const quotation = quotationResult.rows[0];
+      itemsQuery = 'SELECT * FROM quotation_items WHERE quotation_id = $1 ORDER BY item_order';
+      const itemsResult = await query(itemsQuery, [quotation.id]);
+      quotation.items = itemsResult.rows;
+      return quotation;
+    }
     
     const quotationResult = await query(quotationQuery, [id]);
     if (quotationResult.rows.length === 0) return null;
     
     const quotation = quotationResult.rows[0];
-    const itemsResult = await query(itemsQuery, [id]);
+    const itemsResult = await query(itemsQuery, [quotation.id]);
     quotation.items = itemsResult.rows;
     
     return quotation;
   }
 
-  // Get quotations by customer
   async getByCustomer(customerId) {
     const queryText = `
       SELECT q.*, 
@@ -253,7 +256,66 @@ class Quotation extends BaseModel {
     return result.rows;
   }
 
-  // Submit for verification
+  async getDepartmentHeadEmail(customerId) {
+    if (!customerId) return null;
+    
+    try {
+      const leadQuery = `
+        SELECT COALESCE(dhl.created_by, dh_spl.created_by) as department_head_email
+        FROM (
+          SELECT $1::integer as lead_id
+        ) q
+        LEFT JOIN department_head_leads dhl ON dhl.id = q.lead_id
+        LEFT JOIN salesperson_leads spl ON spl.id = q.lead_id
+        LEFT JOIN department_head_leads dh_spl ON dh_spl.id = spl.dh_lead_id
+        LIMIT 1
+      `;
+      const leadResult = await query(leadQuery, [customerId]);
+      
+      if (leadResult.rows && leadResult.rows.length > 0) {
+        return leadResult.rows[0].department_head_email || null;
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async sendQuotationNotification(notificationType, quotation, notifyEmail, additionalData = {}) {
+    if (!quotation || !notifyEmail) return;
+
+    try {
+      const quotationData = {
+        id: quotation.id,
+        quotation_number: quotation.quotation_number,
+        customer_name: quotation.customer_name,
+        total_amount: quotation.total_amount,
+        created_by: quotation.created_by,
+        ...additionalData
+      };
+
+      let notificationPromise;
+      switch (notificationType) {
+        case 'pending':
+          notificationPromise = notificationService.notifyQuotationPending(quotationData, notifyEmail);
+          break;
+        case 'approved':
+          notificationPromise = notificationService.notifyQuotationApproved(quotationData, additionalData.approvedBy || 'System', notifyEmail);
+          break;
+        case 'rejected':
+          notificationPromise = notificationService.notifyQuotationRejected(quotationData, additionalData.rejectedBy || 'System', notifyEmail);
+          break;
+        default:
+          console.warn(`⚠️ Unknown notification type: ${notificationType}`);
+          return;
+      }
+
+      await notificationPromise;
+    } catch (error) {
+      console.error(`Error sending ${notificationType} notification:`, error);
+    }
+  }
+
   async submitForVerification(id, submittedBy) {
     const queryText = `
       UPDATE quotations 
@@ -265,36 +327,24 @@ class Quotation extends BaseModel {
       RETURNING *
     `;
     
-    // Use a placeholder UUID for updated_by column
-    const placeholderUserId = '00000000-0000-0000-0000-000000000001'; // Use a valid UUID
+    const placeholderUserId = '00000000-0000-0000-0000-000000000001';
     const result = await query(queryText, [id, placeholderUserId]);
+    const quotation = result[0];
     
-    // Log the submission - use email instead of UUID to avoid FK constraint issues
     await this.logApprovalAction(id, 'submitted', submittedBy, 'salesperson', 'Quotation submitted for verification');
     
-    return result[0];
+    if (quotation && quotation.customer_id) {
+      const departmentHeadEmail = await this.getDepartmentHeadEmail(quotation.customer_id);
+      if (departmentHeadEmail) {
+        await this.sendQuotationNotification('pending', quotation, departmentHeadEmail);
+      }
+    }
+    
+    return quotation;
   }
 
-  // Approve quotation
   async approve(id, approvedBy, notes = '') {
     try {
-      console.log('Approving quotation:', { id, approvedBy, notes });
-      
-      // Check the actual database schema for quotations table
-      try {
-        const schemaCheck = await query(`
-          SELECT column_name, data_type 
-          FROM information_schema.columns 
-          WHERE table_name = 'quotations' 
-          AND column_name IN ('verified_by', 'updated_by')
-          ORDER BY column_name
-        `);
-        console.log('Quotations table schema for user columns:', schemaCheck);
-      } catch (schemaError) {
-        console.log('Could not check schema:', schemaError.message);
-      }
-      
-      // Try a simpler query first to see what columns actually exist
       const queryText = `
         UPDATE quotations 
         SET status = 'approved', 
@@ -304,38 +354,31 @@ class Quotation extends BaseModel {
         RETURNING *
       `;
       
-      // Use a placeholder UUID for verified_by and updated_by columns
-      const placeholderUserId = '00000000-0000-0000-0000-000000000001'; // Use a valid UUID
-      
-      console.log('Approving with parameters:', {
-        id: id,
-        notes: notes,
-        idType: typeof id,
-        notesType: typeof notes
-      });
-      
       const result = await query(queryText, [id, notes]);
+      const quotation = result[0];
       
-      // Log the approval (with error handling)
       try {
         await this.logApprovalAction(id, 'approved', approvedBy, 'department_head', notes);
       } catch (logError) {
         console.error('Failed to log approval action:', logError);
-        // Don't throw the error, just log it - the main operation succeeded
       }
       
-      return result[0];
+      if (quotation && quotation.created_by) {
+        await this.sendQuotationNotification('approved', quotation, quotation.created_by, {
+          approvedBy,
+          rejection_reason: notes
+        });
+      }
+      
+      return quotation;
     } catch (error) {
       console.error('Error in approve function:', error);
       throw error;
     }
   }
 
-  // Reject quotation
   async reject(id, rejectedBy, notes = '') {
     try {
-      console.log('Rejecting quotation:', { id, rejectedBy, notes });
-      
       const queryText = `
         UPDATE quotations 
         SET status = 'rejected', 
@@ -345,31 +388,29 @@ class Quotation extends BaseModel {
         RETURNING *
       `;
       
-      console.log('Rejecting with parameters:', {
-        id: id,
-        notes: notes,
-        idType: typeof id,
-        notesType: typeof notes
-      });
-      
       const result = await query(queryText, [id, notes]);
+      const quotation = result[0];
       
-      // Log the rejection (with error handling)
       try {
         await this.logApprovalAction(id, 'rejected', rejectedBy, 'department_head', notes);
       } catch (logError) {
         console.error('Failed to log rejection action:', logError);
-        // Don't throw the error, just log it - the main operation succeeded
       }
       
-      return result[0];
+      if (quotation && quotation.created_by) {
+        await this.sendQuotationNotification('rejected', quotation, quotation.created_by, {
+          rejectedBy,
+          rejection_reason: notes
+        });
+      }
+      
+      return quotation;
     } catch (error) {
       console.error('Error in reject function:', error);
       throw error;
     }
   }
 
-  // Send to customer
   async sendToCustomer(id, sentBy, sentTo, sentVia = 'email') {
     const queryText = `
       UPDATE quotations 
@@ -381,17 +422,13 @@ class Quotation extends BaseModel {
       RETURNING *
     `;
     
-    // Use a placeholder UUID for updated_by column
-    const placeholderUserId = '00000000-0000-0000-0000-000000000001'; // Use a valid UUID
+    const placeholderUserId = '00000000-0000-0000-0000-000000000001';
     const result = await query(queryText, [id, placeholderUserId]);
-    
-    // Log the send action
     await this.logSentAction(id, sentTo, sentVia, sentBy);
     
     return result[0];
   }
 
-  // Customer accepts quotation
   async acceptByCustomer(id, acceptedBy) {
     const queryText = `
       UPDATE quotations 
@@ -406,22 +443,12 @@ class Quotation extends BaseModel {
     return await query(queryText, [id, acceptedBy]);
   }
 
-  // Log approval actions
   async logApprovalAction(quotationId, action, performedBy, performedByType, notes) {
     try {
-      // Use the actual performedBy email since performed_by is now VARCHAR
-      const placeholderId = performedBy || 'system@anocab.com'; // Use actual email or system email
-      
-      // Ensure quotationId is properly formatted (it should be a UUID string)
+      const placeholderId = performedBy || 'system@anocab.com';
       const formattedQuotationId = typeof quotationId === 'string' ? quotationId : quotationId.toString();
-      
-      // Ensure action is a string
       const formattedAction = typeof action === 'string' ? action : action.toString();
-      
-      // Ensure performedByType is a string
       const formattedPerformedByType = typeof performedByType === 'string' ? performedByType : performedByType.toString();
-      
-      // Ensure notes is a string or null
       const formattedNotes = notes ? (typeof notes === 'string' ? notes : notes.toString()) : null;
       
       const queryText = `
@@ -429,23 +456,10 @@ class Quotation extends BaseModel {
         VALUES ($1, $2, $3, $4, $5)
       `;
       
-      console.log('Logging approval action:', {
-        quotationId: formattedQuotationId,
-        action: formattedAction,
-        performedBy: placeholderId,
-        performedByType: formattedPerformedByType,
-        notes: formattedNotes
-      });
-      
       return await query(queryText, [formattedQuotationId, formattedAction, placeholderId, formattedPerformedByType, formattedNotes]);
     } catch (error) {
-      console.error('Error in logApprovalAction:', error);
-      
-      // If it's a foreign key constraint error, try to drop and recreate the table
       if (error.message && error.message.includes('foreign key constraint')) {
-        console.log('Foreign key constraint error detected, attempting to fix table structure...');
         try {
-          // Drop the table and recreate without foreign key constraints
           await query('DROP TABLE IF EXISTS quotation_approval_logs CASCADE');
           await query(`
             CREATE TABLE quotation_approval_logs (
@@ -458,22 +472,23 @@ class Quotation extends BaseModel {
               created_at TIMESTAMP DEFAULT NOW()
             );
           `);
-          console.log('quotation_approval_logs table recreated without foreign key constraints');
-          
-          // Retry the insert
+          const formattedQuotationId = typeof quotationId === 'string' ? quotationId : quotationId.toString();
+          const formattedAction = typeof action === 'string' ? action : action.toString();
+          const formattedPerformedByType = typeof performedByType === 'string' ? performedByType : performedByType.toString();
+          const formattedNotes = notes ? (typeof notes === 'string' ? notes : notes.toString()) : null;
+          const placeholderId = performedBy || 'system@anocab.com';
+          const queryText = `
+            INSERT INTO quotation_approval_logs (quotation_id, action, performed_by, performed_by_type, notes)
+            VALUES ($1, $2, $3, $4, $5)
+          `;
           return await query(queryText, [formattedQuotationId, formattedAction, placeholderId, formattedPerformedByType, formattedNotes]);
         } catch (recreateError) {
           console.error('Failed to recreate table:', recreateError);
-          // Don't throw the error, just log it - the main operation succeeded
         }
       }
-      
-      // Don't throw the error, just log it - the main operation succeeded
-      console.log('Logging failed but main operation succeeded');
     }
   }
 
-  // Log sent actions
   async logSentAction(quotationId, sentTo, sentVia, sentBy) {
     const queryText = `
       INSERT INTO quotation_sent_logs (quotation_id, sent_to, sent_via, sent_by)
@@ -483,12 +498,9 @@ class Quotation extends BaseModel {
     return await query(queryText, [quotationId, sentTo, sentVia, sentBy]);
   }
 
-  // Generate quotation number
   async generateQuotationNumber() {
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
-    
-    // Get the last quotation number for this year-month
     const queryText = `
       SELECT quotation_number 
       FROM quotations 
@@ -500,10 +512,8 @@ class Quotation extends BaseModel {
     const result = await query(queryText, [pattern]);
     
     if (result.rows.length === 0) {
-      // First quotation of the month
       return `QT${year}${month}001`;
     } else {
-      // Get the last number and increment
       const lastNumber = result.rows[0].quotation_number;
       const lastSeq = parseInt(lastNumber.slice(-3));
       const newSeq = String(lastSeq + 1).padStart(3, '0');
@@ -511,7 +521,6 @@ class Quotation extends BaseModel {
     }
   }
 
-  // Get quotation history (all revisions)
   async getHistory(quotationId) {
     const queryText = `
       SELECT q.*, 
@@ -538,15 +547,11 @@ class Quotation extends BaseModel {
       [quotationId]
     );
     const approvalLogs = approvalLogsRes.rows || [];
-    
-    // Get sent logs (rows array)
     const sentLogsRes = await query(
       'SELECT * FROM quotation_sent_logs WHERE quotation_id = $1 ORDER BY sent_at ASC',
       [quotationId]
     );
     const sentLogs = sentLogsRes.rows || [];
-    
-    // Get PIs (rows array) — tolerate envs where proforma_invoices might not exist yet
     let pis = [];
     try {
       const pisRes = await query(
@@ -560,7 +565,6 @@ class Quotation extends BaseModel {
       }
     }
     
-    // Get payment history for this quotation (if payment_history table exists)
     let payments = [];
     try {
       const paymentsRes = await query(
@@ -569,8 +573,7 @@ class Quotation extends BaseModel {
       );
       payments = paymentsRes.rows || [];
     } catch (err) {
-      // payment_history table might not exist, ignore
-      console.log('payment_history table not found, skipping payments');
+      // payment_history table might not exist
     }
     
     return {
@@ -582,8 +585,6 @@ class Quotation extends BaseModel {
     };
   }
 
-  // Get quotations pending verification for department head
-  // Check for status='pending' AND submitted_for_verification_at IS NOT NULL
   async getPendingVerification(departmentType = null, companyName = null) {
     let queryText = `
       SELECT q.*, 
@@ -600,7 +601,6 @@ class Quotation extends BaseModel {
     const values = [];
     let paramCount = 1;
 
-    // STRICT CHECK: Filter by department type if provided
     if (departmentType) {
       queryText += ` AND dh.department_type = $${paramCount}`;
       values.push(departmentType);
@@ -622,7 +622,6 @@ class Quotation extends BaseModel {
     return result.rows;
   }
 
-  // Get quotations by status for department head
   async getByStatus(status, departmentType = null, companyName = null) {
     let queryText = `
       SELECT q.*, 
@@ -638,7 +637,6 @@ class Quotation extends BaseModel {
     const values = [status];
     let paramCount = 2;
 
-    // STRICT CHECK: Filter by department type if provided
     if (departmentType) {
       queryText += ` AND dh.department_type = $${paramCount}`;
       values.push(departmentType);
@@ -660,7 +658,6 @@ class Quotation extends BaseModel {
     return result.rows;
   }
 
-  // Get quotations by salesperson (for salesperson view)
   async getBySalesperson(salespersonEmail) {
     const queryText = `
       SELECT q.*, 
@@ -676,10 +673,8 @@ class Quotation extends BaseModel {
     return result.rows;
   }
 
-  // Delete quotation by ID (cascade delete items)
   async deleteById(id) {
     try {
-      console.log('Deleting quotation with ID:', id);
       await query('BEGIN');
       
       // Delete quotation items first

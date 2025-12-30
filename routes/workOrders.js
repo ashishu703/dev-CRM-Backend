@@ -9,7 +9,11 @@ router.use(protect);
 // Work Order CRUD routes
 router.post('/', workOrderController.create);
 router.get('/', workOrderController.getAll);
+router.get('/check/quotation/:quotationId', workOrderController.checkQuotation); // Must be before /:id
 router.get('/:id', workOrderController.getById);
+router.put('/:id', workOrderController.update);
+router.delete('/:id', workOrderController.delete);
+router.patch('/:id/status', workOrderController.updateStatus);
 
 module.exports = router;
 

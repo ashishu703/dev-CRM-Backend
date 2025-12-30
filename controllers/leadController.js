@@ -3,6 +3,8 @@ const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const { validationResult } = require('express-validator');
 const leadAssignmentService = require('../services/leadAssignmentService');
 const SalespersonLead = require('../models/SalespersonLead');
+const notificationService = require('../services/notificationService');
+const logger = require('../utils/logger');
 
 class LeadController {
   // Create a new lead
@@ -20,9 +22,28 @@ class LeadController {
       // For Sales Department Head UI, persist to department_head_leads table
       const dhResult = await DepartmentHeadLead.createFromUi(req.body, req.user.email);
 
-      // Ensure salesperson_leads is synced if assigned
       if (dhResult && dhResult.id) {
         await leadAssignmentService.syncSalespersonLead(dhResult.id);
+        
+        await notificationService.notifyLeadCreated(dhResult, req.user.email);
+        
+        if (req.body.assignedSalesperson && req.body.assignedSalesperson !== 'N/A') {
+          try {
+            const { query } = require('../config/database');
+            const userResult = await query(
+              'SELECT email FROM department_users WHERE username = $1 OR email = $1 LIMIT 1',
+              [req.body.assignedSalesperson]
+            );
+            
+            const salespersonEmail = userResult.rows[0]?.email;
+            
+            if (salespersonEmail) {
+              await notificationService.notifyLeadAssigned(dhResult, salespersonEmail, req.user.email);
+            }
+          } catch (notifError) {
+            logger.error('Failed to send lead assignment notification:', notifError);
+          }
+        }
       }
       
       res.status(201).json({
@@ -208,8 +229,27 @@ class LeadController {
         });
       }
 
-      // Sync salesperson lead if assignment changed or exists
       await leadAssignmentService.syncSalespersonLead(id);
+
+      await notificationService.notifyLeadUpdated(updatedLead, req.user.email, updateData);
+
+      if (updateData.assignedSalesperson && updateData.assignedSalesperson !== 'N/A') {
+        try {
+          const { query } = require('../config/database');
+          const userResult = await query(
+            'SELECT email FROM department_users WHERE username = $1 OR email = $1 LIMIT 1',
+            [updateData.assignedSalesperson]
+          );
+          
+          const salespersonEmail = userResult.rows[0]?.email;
+          
+          if (salespersonEmail) {
+            await notificationService.notifyLeadAssigned(updatedLead, salespersonEmail, req.user.email);
+          }
+        } catch (notifError) {
+          logger.error('Failed to send lead assignment notification:', notifError);
+        }
+      }
 
       res.json({
         success: true,
@@ -249,10 +289,30 @@ class LeadController {
         req.user.companyName
       );
 
-      // Sync salesperson leads if assignment-related fields changed
       if (result && result.rowCount > 0 && (updateData.assignedSalesperson || updateData.assignedTelecaller)) {
+        let salespersonEmail = null;
+        if (updateData.assignedSalesperson && updateData.assignedSalesperson !== 'N/A') {
+          const { query } = require('../config/database');
+          const userResult = await query(
+            'SELECT email FROM department_users WHERE username = $1 OR email = $1 LIMIT 1',
+            [updateData.assignedSalesperson]
+          );
+          salespersonEmail = userResult.rows[0]?.email;
+        }
+        
         for (const id of ids) {
           await leadAssignmentService.syncSalespersonLead(id);
+          
+          if (salespersonEmail) {
+            try {
+              const leadData = await DepartmentHeadLead.getById(id, req.user.email, req.user.departmentType, req.user.companyName);
+              if (leadData) {
+                await notificationService.notifyLeadAssigned(leadData, salespersonEmail, req.user.email);
+              }
+            } catch (notifError) {
+              logger.error('Failed to send batch lead assignment notification:', notifError);
+            }
+          }
         }
       }
 
