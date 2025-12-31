@@ -40,5 +40,11 @@ router.post('/document-templates', configurationController.createDocumentTemplat
 router.put('/document-templates/:id', configurationController.updateDocumentTemplate);
 router.delete('/document-templates/:id', configurationController.deleteDocumentTemplate);
 
+// Push notification configuration (SuperAdmin only)
+const pushNotificationController = require('../controllers/pushNotificationController');
+router.get('/push-notification', pushNotificationController.getConfig);
+router.post('/push-notification', pushNotificationController.saveConfig);
+router.get('/push-notification/vapid-key', pushNotificationController.getPublicVapidKey);
+
 module.exports = router;
 

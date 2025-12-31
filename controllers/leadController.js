@@ -5,9 +5,22 @@ const leadAssignmentService = require('../services/leadAssignmentService');
 const SalespersonLead = require('../models/SalespersonLead');
 const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
+const { query } = require('../config/database');
 
 class LeadController {
-  // Create a new lead
+  async _getEmailFromUsername(username) {
+    try {
+      const result = await query(
+        'SELECT email FROM department_users WHERE username = $1 OR email = $1 LIMIT 1',
+        [username]
+      );
+      return result.rows[0]?.email || null;
+    } catch (error) {
+      logger.error('Error getting email from username:', error);
+      return null;
+    }
+  }
+
   async create(req, res) {
     try {
       const errors = validationResult(req);
@@ -28,20 +41,13 @@ class LeadController {
         await notificationService.notifyLeadCreated(dhResult, req.user.email);
         
         if (req.body.assignedSalesperson && req.body.assignedSalesperson !== 'N/A') {
-          try {
-            const { query } = require('../config/database');
-            const userResult = await query(
-              'SELECT email FROM department_users WHERE username = $1 OR email = $1 LIMIT 1',
-              [req.body.assignedSalesperson]
-            );
-            
-            const salespersonEmail = userResult.rows[0]?.email;
-            
-            if (salespersonEmail) {
+          const salespersonEmail = await this._getEmailFromUsername(req.body.assignedSalesperson);
+          if (salespersonEmail) {
+            try {
               await notificationService.notifyLeadAssigned(dhResult, salespersonEmail, req.user.email);
+            } catch (notifError) {
+              logger.error('Failed to send lead assignment notification:', notifError);
             }
-          } catch (notifError) {
-            logger.error('Failed to send lead assignment notification:', notifError);
           }
         }
       }
@@ -55,7 +61,7 @@ class LeadController {
         }
       });
     } catch (error) {
-      console.error('Error creating lead:', error);
+      logger.error('Error creating lead:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to create lead',
@@ -142,7 +148,7 @@ class LeadController {
         stats
       });
     } catch (error) {
-      console.error('Error fetching leads:', error);
+      logger.error('Error fetching leads:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch leads',
@@ -174,7 +180,7 @@ class LeadController {
         data: lead
       });
     } catch (error) {
-      console.error('Error fetching lead:', error);
+      logger.error('Error fetching lead:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch lead',
@@ -234,20 +240,13 @@ class LeadController {
       await notificationService.notifyLeadUpdated(updatedLead, req.user.email, updateData);
 
       if (updateData.assignedSalesperson && updateData.assignedSalesperson !== 'N/A') {
-        try {
-          const { query } = require('../config/database');
-          const userResult = await query(
-            'SELECT email FROM department_users WHERE username = $1 OR email = $1 LIMIT 1',
-            [updateData.assignedSalesperson]
-          );
-          
-          const salespersonEmail = userResult.rows[0]?.email;
-          
-          if (salespersonEmail) {
+        const salespersonEmail = await this._getEmailFromUsername(updateData.assignedSalesperson);
+        if (salespersonEmail) {
+          try {
             await notificationService.notifyLeadAssigned(updatedLead, salespersonEmail, req.user.email);
+          } catch (notifError) {
+            logger.error('Failed to send lead assignment notification:', notifError);
           }
-        } catch (notifError) {
-          logger.error('Failed to send lead assignment notification:', notifError);
         }
       }
 
@@ -257,7 +256,7 @@ class LeadController {
         data: updatedLead
       });
     } catch (error) {
-      console.error('Error updating lead:', error);
+      logger.error('Error updating lead:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to update lead',
@@ -290,15 +289,9 @@ class LeadController {
       );
 
       if (result && result.rowCount > 0 && (updateData.assignedSalesperson || updateData.assignedTelecaller)) {
-        let salespersonEmail = null;
-        if (updateData.assignedSalesperson && updateData.assignedSalesperson !== 'N/A') {
-          const { query } = require('../config/database');
-          const userResult = await query(
-            'SELECT email FROM department_users WHERE username = $1 OR email = $1 LIMIT 1',
-            [updateData.assignedSalesperson]
-          );
-          salespersonEmail = userResult.rows[0]?.email;
-        }
+        const salespersonEmail = updateData.assignedSalesperson && updateData.assignedSalesperson !== 'N/A'
+          ? await this._getEmailFromUsername(updateData.assignedSalesperson)
+          : null;
         
         for (const id of ids) {
           await leadAssignmentService.syncSalespersonLead(id);
@@ -318,7 +311,7 @@ class LeadController {
 
       return res.json({ success: true, updated: result?.rowCount || 0 });
     } catch (error) {
-      console.error('Error batch updating leads:', error);
+      logger.error('Error batch updating leads:', error);
       res.status(500).json({ success: false, message: 'Failed to batch update leads', error: error.message });
     }
   }
@@ -353,7 +346,6 @@ class LeadController {
         );
         } catch (e) {
           // Leads table might not exist or might not have is_deleted column
-          console.log('Could not soft delete from leads table:', e.message);
         }
 
         // Soft delete associated salesperson_leads
@@ -388,7 +380,7 @@ class LeadController {
         client.release();
       }
     } catch (error) {
-      console.error('Error deleting lead:', error);
+      logger.error('Error deleting lead:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to delete lead',
@@ -430,7 +422,7 @@ class LeadController {
         deletedCount: result.rowCount
       });
     } catch (error) {
-      console.error('Error bulk deleting leads:', error);
+      logger.error('Error bulk deleting leads:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to delete leads',
@@ -444,7 +436,6 @@ class LeadController {
     try {
 
       if (!req.user) {
-        console.log('No user found in request - authentication issue');
         return res.status(401).json({
           success: false,
           message: 'Authentication required'
@@ -452,7 +443,6 @@ class LeadController {
       }
 
       if (!req.body.leads || !Array.isArray(req.body.leads)) {
-        console.log('Invalid CSV data format - no leads array');
         return res.status(400).json({
           success: false,
           message: 'Invalid CSV data format'
@@ -503,12 +493,12 @@ class LeadController {
                   notes: `Imported and assigned from CSV`
                 });
               } catch (meetingError) {
-                console.error(`Error creating meeting for imported lead ${row.id}:`, meetingError);
+                logger.error(`Error creating meeting for imported lead ${row.id}:`, meetingError);
                 // Don't block import if meeting creation fails
               }
             }
           } catch (syncError) {
-            console.error(`Error syncing lead ${row.id}:`, syncError);
+            logger.error(`Error syncing lead ${row.id}:`, syncError);
             // Continue with other leads even if one fails
           }
         }
@@ -536,8 +526,7 @@ class LeadController {
         }
       });
     } catch (error) {
-      console.error('Error importing CSV:', error);
-      console.error('Error stack:', error.stack);
+      logger.error('Error importing CSV:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to import CSV',
@@ -575,13 +564,39 @@ class LeadController {
         }
       }
 
-      // Update assigned salesperson and transfer info on department_head_leads
       try {
         await DepartmentHeadLead.transferLead(id, transferredTo, transferredFrom, reason);
         await leadAssignmentService.syncSalespersonLead(id);
+        
+        let leadData = null;
+        
+        try {
+          leadData = await DepartmentHeadLead.getById(id, req.user.email, req.user.departmentType, req.user.companyName);
+        } catch (getError) {
+          try {
+            const result = await query('SELECT * FROM department_head_leads WHERE id = $1 LIMIT 1', [id]);
+            if (result.rows?.length > 0) {
+              leadData = result.rows[0];
+            }
+          } catch (fallbackError) {
+            logger.error(`Failed to get lead data for notification ${id}:`, fallbackError);
+          }
+        }
+        
+        if (leadData) {
+          const transferredToEmail = await this._getEmailFromUsername(transferredTo) || transferredTo;
+          const transferredFromEmail = req.user?.email || transferredFrom;
+          
+          if (transferredToEmail && transferredFromEmail) {
+            try {
+              await notificationService.notifyLeadTransferred(leadData, transferredToEmail, transferredFromEmail, reason || 'Transferred via edit form');
+            } catch (notifError) {
+              logger.error('Failed to send transfer notification:', notifError);
+            }
+          }
+        }
       } catch (syncError) {
-        console.error('Lead transfer sync warning:', syncError);
-        // Fallback: just update assigned salesperson
+        logger.error('Lead transfer sync warning:', syncError);
         try {
           await DepartmentHeadLead.updateById(
             id,
@@ -592,7 +607,7 @@ class LeadController {
           );
           await leadAssignmentService.syncSalespersonLead(id);
         } catch (fallbackError) {
-          console.error('Lead transfer fallback error:', fallbackError);
+          logger.error('Lead transfer fallback error:', fallbackError);
         }
       }
 
@@ -601,7 +616,7 @@ class LeadController {
         message: 'Lead transferred successfully'
       });
     } catch (error) {
-      console.error('Error transferring lead:', error);
+      logger.error('Error transferring lead:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to transfer lead',
@@ -620,7 +635,7 @@ class LeadController {
         data: stats
       });
     } catch (error) {
-      console.error('Error fetching lead stats:', error);
+      logger.error('Error fetching lead stats:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch lead statistics',

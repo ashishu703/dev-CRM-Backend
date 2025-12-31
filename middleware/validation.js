@@ -222,21 +222,36 @@ const schemas = {
   // User profile update
   updateProfile: Joi.object({
     username: Joi.string()
-      .alphanum()
       .min(3)
-      .max(30)
+      .max(255)
+      .optional()
       .messages({
-        'string.alphanum': 'Username must contain only alphanumeric characters',
         'string.min': 'Username must be at least 3 characters long',
-        'string.max': 'Username cannot exceed 30 characters'
+        'string.max': 'Username cannot exceed 255 characters'
       }),
     email: Joi.string()
       .email()
+      .optional()
       .messages({
         'string.email': 'Please provide a valid email address'
       }),
+    phone: Joi.string()
+      .pattern(/^[0-9]{10}$/)
+      .optional()
+      .allow('')
+      .messages({
+        'string.pattern.base': 'Phone number must be exactly 10 digits'
+      }),
+    profilePicture: Joi.string()
+      .uri()
+      .optional()
+      .allow('')
+      .messages({
+        'string.uri': 'Profile picture must be a valid URL'
+      }),
     bio: Joi.string()
       .max(500)
+      .optional()
       .allow('')
       .messages({
         'string.max': 'Bio cannot exceed 500 characters'

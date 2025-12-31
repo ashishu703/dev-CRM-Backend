@@ -165,6 +165,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/proforma-invoices', proformaInvoiceRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/configuration', configurationRoutes);
+app.use('/api/notification', require('./routes/pushNotifications'));
 app.use('/api/upload', uploadRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/security-logs', securityLogRoutes);
