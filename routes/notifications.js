@@ -19,17 +19,31 @@ router.get('/', async (req, res) => {
     const notifications = await Notification.getByUserEmail(email, { limit, offset, isRead });
     const unreadCount = await Notification.getUnreadCount(email);
 
-    const formattedNotifications = notifications.map(n => ({
-      id: n.id,
-      type: n.type,
-      title: n.title,
-      message: n.message,
-      time: n.created_at,
-      unread: !n.is_read,
-      details: typeof n.details === 'string' ? JSON.parse(n.details) : n.details,
-      referenceId: n.reference_id,
-      referenceType: n.reference_type
-    }));
+    const formattedNotifications = notifications.map(n => {
+      // Convert timestamp to ISO string (UTC) for consistent timezone handling
+      let timeValue = n.created_at;
+      if (timeValue && !(timeValue instanceof Date)) {
+        // If it's a string or other format, convert to Date then ISO
+        const date = new Date(timeValue);
+        timeValue = isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+      } else if (timeValue instanceof Date) {
+        timeValue = timeValue.toISOString();
+      } else {
+        timeValue = new Date().toISOString();
+      }
+      
+      return {
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        time: timeValue,
+        unread: !n.is_read,
+        details: typeof n.details === 'string' ? JSON.parse(n.details) : n.details,
+        referenceId: n.reference_id,
+        referenceType: n.reference_type
+      };
+    });
 
     res.json({ 
       success: true, 

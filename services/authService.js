@@ -406,6 +406,8 @@ class AuthService {
         id: user.id,
         username: user.username,
         email: user.email,
+        phone: user.phone || user.mobile || null,
+        profile_picture: user.profile_picture || user.profilePicture || null,
         role: userType,
         departmentType: user.department_type || user.departmentType,
         companyName: user.company_name || user.companyName,
@@ -427,6 +429,58 @@ class AuthService {
       };
     } catch (error) {
       logger.error('Get user profile failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update user profile
+   * @param {string} userId - User ID
+   * @param {Object} updateData - Data to update
+   * @param {string} userType - Type of user
+   * @returns {Object} Updated user profile
+   */
+  async updateProfile(userId, updateData, userType) {
+    try {
+      let user;
+      
+      if (userType === 'superadmin') {
+        user = await SuperAdmin.findById(userId);
+      } else if (userType === 'department_head') {
+        user = await DepartmentHead.findById(userId);
+      } else {
+        user = await DepartmentUser.findById(userId);
+      }
+
+      if (!user) {
+        throw new Error('User not found');
+      }
+
+      const updateFields = {};
+      if (updateData.username !== undefined) updateFields.username = updateData.username;
+      if (updateData.email !== undefined) updateFields.email = updateData.email;
+      if (updateData.phone !== undefined) updateFields.phone = updateData.phone;
+      if (updateData.mobile !== undefined) updateFields.phone = updateData.mobile;
+      if (updateData.profilePicture !== undefined) updateFields.profile_picture = updateData.profilePicture;
+      if (updateData.profile_picture !== undefined) updateFields.profile_picture = updateData.profile_picture;
+
+      await user.update(updateFields, userId);
+
+      const updatedProfile = await this.getUserProfile(userId, userType);
+
+      logger.info('Profile updated successfully', {
+        userId,
+        userType,
+        updatedFields: Object.keys(updateFields)
+      });
+
+      return {
+        success: true,
+        message: 'Profile updated successfully',
+        user: updatedProfile.user
+      };
+    } catch (error) {
+      logger.error('Update profile failed:', error);
       throw error;
     }
   }

@@ -33,6 +33,19 @@ class SuperAdmin extends BaseModel {
     if (result.rows.length > 0) this.last_login = result.rows[0].last_login;
     return this;
   }
+
+  async update(updateData, updatedBy) {
+    const mapped = {};
+    if (updateData.username !== undefined) mapped.username = updateData.username;
+    if (updateData.email !== undefined) mapped.email = updateData.email;
+    if (updateData.phone !== undefined) mapped.phone = updateData.phone;
+    if (updateData.profile_picture !== undefined) mapped.profile_picture = updateData.profile_picture;
+    if (updateData.password) {
+      const bcrypt = require('bcryptjs');
+      mapped.password = await bcrypt.hash(updateData.password, 12);
+    }
+    return await super.update(this.constructor.TABLE_NAME, mapped, updatedBy);
+  }
 }
 
 module.exports = SuperAdmin;

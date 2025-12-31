@@ -171,7 +171,41 @@ const getProfile = async (req, res) => {
 // @route   PUT /api/auth/profile
 // @access  Private
 const updateProfile = async (req, res) => {
-  BaseController.handleError(res, new Error('Profile update not implemented'), 'Profile update not implemented', 501);
+  await BaseController.handleAsyncOperation(
+    res,
+    async () => {
+      const userType = req.user.type || req.user.role;
+      let updateData = { ...req.body };
+
+      // Handle file upload if profile picture is provided
+      if (req.file) {
+        const cloudinaryService = require('../services/cloudinaryService');
+        try {
+          const fileBuffer = req.file.buffer;
+          const profilePictureUrl = await cloudinaryService.uploadFile(fileBuffer, {
+            folder: 'profile-pictures',
+            resourceType: 'image',
+            transformation: [
+              { width: 400, height: 400, crop: 'fill', gravity: 'face' }
+            ]
+          });
+          updateData.profilePicture = profilePictureUrl;
+        } catch (error) {
+          logger.error('Cloudinary upload error:', error);
+          throw new Error('Failed to upload profile picture');
+        }
+      }
+
+      const result = await authService.updateProfile(
+        req.user.id,
+        updateData,
+        userType
+      );
+      return result;
+    },
+    'Profile updated successfully',
+    'Failed to update profile'
+  );
 };
 
 // @desc    Change password

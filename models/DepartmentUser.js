@@ -174,6 +174,8 @@ class DepartmentUser extends BaseModel {
     const mapped = {};
     if (updateData.username !== undefined) mapped.username = updateData.username;
     if (updateData.email !== undefined) mapped.email = updateData.email;
+    if (updateData.phone !== undefined) mapped.phone = updateData.phone;
+    if (updateData.profile_picture !== undefined) mapped.profile_picture = updateData.profile_picture;
     if (updateData.departmentType !== undefined) mapped.department_type = updateData.departmentType;
     if (updateData.companyName !== undefined) mapped.company_name = updateData.companyName;
     if (updateData.headUserId !== undefined) mapped.head_user_id = updateData.headUserId;

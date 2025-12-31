@@ -38,8 +38,13 @@ class Notification {
   static async getByUserEmail(userEmail, options = {}) {
     const { limit = 50, offset = 0, isRead = null } = options;
     
+    // Use created_at as-is (PostgreSQL handles timezone conversion)
     let queryText = `
-      SELECT * FROM notifications 
+      SELECT 
+        id, user_email, user_id, type, title, message, details, 
+        is_read, read_at, reference_id, reference_type,
+        created_at
+      FROM notifications 
       WHERE LOWER(user_email) = LOWER($1)
     `;
     const params = [userEmail];
