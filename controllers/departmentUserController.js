@@ -4,13 +4,42 @@ const BaseController = require('./BaseController');
 const TargetCalculationService = require('../services/targetCalculationService');
 const DepartmentCleanupService = require('../services/departmentCleanupService');
 const UserLeadAssignmentService = require('../services/userLeadAssignmentService');
+const MonthlyTarget = require('../models/MonthlyTarget');
+const notificationService = require('../services/notificationService');
+const { parseToLocalDate, toDateOnly } = require('../utils/dateOnly');
 
 class DepartmentUserController extends BaseController {
+  static _toDateOnly(value) {
+    return toDateOnly(value);
+  }
+
   static async _enrichUserTargetData(userJson) {
     const targetStartDate = userJson.target_start_date || userJson.targetStartDate;
     const targetEndDate = userJson.target_end_date || userJson.targetEndDate;
-    const startDateStr = targetStartDate ? new Date(targetStartDate).toISOString().split('T')[0] : null;
-    const endDateStr = targetEndDate ? new Date(targetEndDate).toISOString().split('T')[0] : null;
+    // IMPORTANT: Do NOT use toISOString() here (timezone shifts can move the date to previous day)
+    const startDateStr = DepartmentUserController._toDateOnly(targetStartDate);
+    let endDateStr = DepartmentUserController._toDateOnly(targetEndDate);
+
+    // If end date is missing (older records), derive month-end from start date so calculations stay month-wise.
+    if (!endDateStr && startDateStr) {
+      const start = parseToLocalDate(startDateStr);
+      if (start && !isNaN(start.getTime())) {
+        const monthEnd = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+        endDateStr = toDateOnly(monthEnd);
+      }
+    }
+
+    // Ensure callers (frontend) always receive a complete, date-only target window.
+    // Do not depend on DB legacy fields being present for older rows.
+    if (startDateStr) {
+      userJson.targetStartDate = startDateStr;
+      // Keep snake_case field aligned for older UI code paths
+      userJson.target_start_date = userJson.target_start_date || startDateStr;
+    }
+    if (endDateStr) {
+      userJson.targetEndDate = endDateStr;
+      userJson.target_end_date = userJson.target_end_date || endDateStr;
+    }
     
     const [recalculatedAchieved, duePayment] = await Promise.all([
       TargetCalculationService.calculateAchievedTarget(userJson.id, startDateStr, endDateStr),
@@ -42,7 +71,18 @@ class DepartmentUserController extends BaseController {
 
   static async create(req, res) {
     await BaseController.handleAsyncOperation(res, async () => {
-      const { username, email, password, departmentType, companyName, headUserId, headUserEmail, target } = req.body;
+      const {
+        username,
+        email,
+        password,
+        departmentType,
+        companyName,
+        headUserId,
+        headUserEmail,
+        target,
+        targetStartDate,
+        targetDurationDays
+      } = req.body;
       
       BaseController.validateRequiredFields(['username', 'email', 'password', 'target'], req.body);
       
@@ -83,9 +123,9 @@ class DepartmentUserController extends BaseController {
       }
 
       if (req.body.targetStartDate !== undefined) {
-        const userStartDate = new Date(req.body.targetStartDate).toISOString().split('T')[0];
-        const headStartDate = headUser.target_start_date 
-          ? new Date(headUser.target_start_date).toISOString().split('T')[0]
+        const userStartDate = DepartmentUserController._toDateOnly(req.body.targetStartDate);
+        const headStartDate = headUser.target_start_date
+          ? DepartmentUserController._toDateOnly(headUser.target_start_date)
           : null;
         
         if (headStartDate && userStartDate !== headStartDate) {
@@ -123,16 +163,59 @@ class DepartmentUserController extends BaseController {
         }
       }
 
+      // Compute month window from head's target_start_date (preferred) or provided date
+      const headStart = headUser.target_start_date ? parseToLocalDate(headUser.target_start_date) : null;
+      const startBase = headStart || (targetStartDate ? parseToLocalDate(targetStartDate) : null);
+      const monthStart = startBase ? new Date(startBase.getFullYear(), startBase.getMonth(), 1) : null;
+      const monthEnd = monthStart ? new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0) : null;
+      if (monthEnd) monthEnd.setHours(23, 59, 59, 999);
+
       const userData = {
         username, email, password,
         departmentType: departmentType || headUser.department_type || headUser.departmentType,
         companyName: companyName || headUser.company_name || headUser.companyName,
         headUserId: headUser.id,
         target: target || 0,
+        targetStartDate: monthStart ? toDateOnly(monthStart) : null,
+        targetEndDate: monthEnd ? toDateOnly(monthEnd) : null,
+        targetDurationDays: targetDurationDays !== undefined ? parseInt(targetDurationDays) : null,
         createdBy: req.user.id
       };
 
       const newUser = await DepartmentUser.create(userData);
+
+      // Persist monthly target history + notify assigned user
+      const now = new Date();
+      const mStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthStr = toDateOnly(mStart);
+      await MonthlyTarget.upsert({
+        month: monthStr,
+        assigneeRole: 'department_user',
+        assigneeId: newUser.id,
+        assigneeEmail: newUser.email,
+        assignerRole: 'department_head',
+        assignerId: headUser.id,
+        assignerEmail: headUser.email,
+        companyName: newUser.company_name || newUser.companyName,
+        departmentType: newUser.department_type || newUser.departmentType,
+        targetAmount: Number(newUser.target || 0)
+      });
+
+      const amount = Number(newUser.target || 0).toLocaleString('en-IN');
+      await notificationService.sendNotification(newUser.email, {
+        type: 'target_assigned',
+        title: '🎯 Monthly Target Assigned',
+        message: `You have been assigned a monthly target of ₹${amount} for ${mStart.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}`,
+        details: {
+          month: monthStr,
+          target: Number(newUser.target || 0),
+          assignedBy: headUser.email,
+          assignedAt: new Date().toISOString()
+        },
+        referenceId: String(newUser.id),
+        referenceType: 'target'
+      });
+
       return { user: newUser.toJSON() };
     }, 'Department user created successfully', 'Failed to create department user');
   }
@@ -179,7 +262,9 @@ class DepartmentUserController extends BaseController {
       const { id } = req.params;
       const user = await DepartmentUser.findById(id);
       if (!user) throw new Error('Department user not found');
-      return { user: user.toJSON() };
+      const userJson = user.toJSON();
+      const enriched = await DepartmentUserController._enrichUserTargetData(userJson);
+      return { user: enriched };
     }, 'Department user retrieved successfully', 'Failed to get department user');
   }
 
@@ -249,9 +334,9 @@ class DepartmentUserController extends BaseController {
       }
 
       if (updateData.targetStartDate !== undefined) {
-        const userStartDate = new Date(updateData.targetStartDate).toISOString().split('T')[0];
+        const userStartDate = DepartmentUserController._toDateOnly(updateData.targetStartDate);
         const headStartDate = headUser.target_start_date 
-          ? new Date(headUser.target_start_date).toISOString().split('T')[0]
+          ? DepartmentUserController._toDateOnly(headUser.target_start_date)
           : null;
         
         if (headStartDate && userStartDate !== headStartDate) {
@@ -294,7 +379,57 @@ class DepartmentUserController extends BaseController {
       const usernameChanged = updateData.username !== undefined && updateData.username !== oldUsername;
       const emailChanged = updateData.email !== undefined && updateData.email !== oldEmail;
 
+      const isTargetUpdate = updateData.target !== undefined ||
+        updateData.targetStartDate !== undefined ||
+        updateData.targetEndDate !== undefined ||
+        updateData.targetDurationDays !== undefined;
+
+      // If targetStartDate provided, normalize it to month window (month start/end)
+      if (updateData.targetStartDate) {
+        const d = parseToLocalDate(updateData.targetStartDate);
+        if (!isNaN(d.getTime())) {
+          const ms = new Date(d.getFullYear(), d.getMonth(), 1);
+          const me = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+          me.setHours(23, 59, 59, 999);
+          updateData.targetStartDate = toDateOnly(ms);
+          updateData.targetEndDate = toDateOnly(me);
+        }
+      }
+
       const updatedUser = await user.update(updateData, req.user.id);
+
+      if (isTargetUpdate) {
+        const now = new Date();
+        const mStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthStr = toDateOnly(mStart);
+        await MonthlyTarget.upsert({
+          month: monthStr,
+          assigneeRole: 'department_user',
+          assigneeId: updatedUser.id,
+          assigneeEmail: updatedUser.email,
+          assignerRole: 'department_head',
+          assignerId: headUser.id,
+          assignerEmail: headUser.email,
+          companyName: updatedUser.company_name || updatedUser.companyName,
+          departmentType: updatedUser.department_type || updatedUser.departmentType,
+          targetAmount: Number(updatedUser.target || 0)
+        });
+
+        const amount = Number(updatedUser.target || 0).toLocaleString('en-IN');
+        await notificationService.sendNotification(updatedUser.email, {
+          type: 'target_assigned',
+          title: '🎯 Monthly Target Updated',
+          message: `Your monthly target has been updated to ₹${amount} for ${mStart.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}`,
+          details: {
+            month: monthStr,
+            target: Number(updatedUser.target || 0),
+            assignedBy: headUser.email,
+            assignedAt: new Date().toISOString()
+          },
+          referenceId: String(updatedUser.id),
+          referenceType: 'target'
+        });
+      }
 
       if ((usernameChanged || emailChanged) && updatedUser) {
         const deptType = user.department_type || user.departmentType;

@@ -1,6 +1,7 @@
 const Payment = require('../models/Payment');
 const CustomerCredit = require('../models/CustomerCredit');
 const { getClient, query } = require('../config/database');
+const { toDateOnly } = require('../utils/dateOnly');
 
 class PaymentController {
   /**
@@ -27,6 +28,11 @@ class PaymentController {
         delivery_date,
         delivery_status
       } = req.body;
+
+      // Normalize payment_date to a safe date-only string (YYYY-MM-DD) to keep month filters consistent.
+      // Accepts ISO strings and YYYY-MM-DD from frontend.
+      const normalizedPaymentDateOnly = toDateOnly(payment_date) || toDateOnly(new Date());
+      const normalizedPaymentTimestamp = `${normalizedPaymentDateOnly}T00:00:00`;
 
       // Validate at least one identifier
       if (!lead_id && !quotation_id) {
@@ -221,7 +227,7 @@ class PaymentController {
         delivery_status || 'pending',
         remarks,
         notes,
-        payment_date
+        normalizedPaymentTimestamp
       ]);
 
       // Note: Quotation status will be updated to 'completed' only after payment is approved
@@ -437,16 +443,17 @@ class PaymentController {
         values.push(`%${search}%`);
       }
 
-      // Date range filter
+      // Date range filter (date-only, timezone-safe)
+      // Accepts YYYY-MM-DD and compares against payment_date::date
       if (startDate) {
         paramCount++;
-        whereClause += ` AND ph.payment_date >= $${paramCount}`;
-        values.push(new Date(startDate));
+        whereClause += ` AND ph.payment_date::date >= $${paramCount}::date`;
+        values.push(String(startDate));
       }
       if (endDate) {
         paramCount++;
-        whereClause += ` AND ph.payment_date <= $${paramCount}`;
-        values.push(new Date(endDate));
+        whereClause += ` AND ph.payment_date::date <= $${paramCount}::date`;
+        values.push(String(endDate));
       }
 
       // Get total count - need to join quotations if search includes quotation fields

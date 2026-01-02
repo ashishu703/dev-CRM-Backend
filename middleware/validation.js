@@ -7,6 +7,10 @@ const schemas = {
     email: Joi.string().email().required(),
     password: Joi.string().min(6).required(),
     target: Joi.number().min(0).required(),
+    // Optional target period fields (used by department_head assignment flows)
+    targetStartDate: Joi.date().iso().optional(),
+    targetEndDate: Joi.date().iso().optional(),
+    targetDurationDays: Joi.number().integer().min(0).optional(),
     // departmentType is dynamic; just ensure it's a reasonable string when provided
     departmentType: Joi.string().max(100).optional(),
     companyName: Joi.string().min(1).max(255).optional(),

@@ -1,6 +1,9 @@
 const DepartmentHead = require('../models/DepartmentHead');
 const BaseController = require('./BaseController');
 const DepartmentCleanupService = require('../services/departmentCleanupService');
+const MonthlyTarget = require('../models/MonthlyTarget');
+const notificationService = require('../services/notificationService');
+const { toDateOnly } = require('../utils/dateOnly');
 
 class DepartmentHeadController extends BaseController {
   static async create(req, res) {
@@ -107,6 +110,49 @@ class DepartmentHeadController extends BaseController {
       }
 
       const updatedUser = await user.update(updateData, req.user.id);
+
+      // Persist monthly target history + notify on target update
+      if (isTargetUpdate) {
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthStr = toDateOnly(monthStart);
+
+        await MonthlyTarget.upsert({
+          month: monthStr,
+          assigneeRole: 'department_head',
+          assigneeId: updatedUser.id,
+          assigneeEmail: updatedUser.email,
+          assignerRole: req.user.role === 'superadmin' ? 'superadmin' : 'department_head',
+          assignerId: req.user.id,
+          assignerEmail: req.user.email,
+          companyName: updatedUser.company_name || updatedUser.companyName,
+          departmentType: updatedUser.department_type || updatedUser.departmentType,
+          targetAmount: Number(updatedUser.target || 0)
+        });
+
+        // Notify department head + all users under this head
+        const DepartmentUser = require('../models/DepartmentUser');
+        const users = await DepartmentUser.getByHeadUserId(updatedUser.id);
+        const userEmails = users.map(u => u.email).filter(Boolean);
+
+        const amount = Number(updatedUser.target || 0).toLocaleString('en-IN');
+        await notificationService.sendNotification([updatedUser.email, ...userEmails], {
+          type: 'target_assigned',
+          title: '🎯 Monthly Target Assigned',
+          message: `Monthly target ₹${amount} assigned for ${monthStart.toLocaleString('en-IN', { month: 'short', year: 'numeric' })}`,
+          details: {
+            month: monthStr,
+            target: Number(updatedUser.target || 0),
+            departmentType: updatedUser.department_type || updatedUser.departmentType,
+            companyName: updatedUser.company_name || updatedUser.companyName,
+            assignedBy: req.user.email,
+            assignedAt: new Date().toISOString()
+          },
+          referenceId: String(updatedUser.id),
+          referenceType: 'target'
+        });
+      }
+
       return { user: updatedUser.toJSON() };
     }, 'Department head updated successfully', 'Failed to update department head');
   }

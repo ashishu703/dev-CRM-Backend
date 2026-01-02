@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const SalespersonReportController = require('../controllers/salespersonReportController');
 const OrdersReportController = require('../controllers/ordersReportController');
+const MonthlyHighlightsController = require('../controllers/monthlyHighlightsController');
 const { protect } = require('../middleware/auth');
 
 // All routes require authentication
@@ -29,6 +30,11 @@ router.get('/salesperson/top-performers',
 // Get Salespersons List
 router.get('/salesperson/list', 
   SalespersonReportController.getSalespersonsList.bind(SalespersonReportController)
+);
+
+// Month-start highlights (winner/motivation + dispatch notifications)
+router.get('/monthly-highlights',
+  MonthlyHighlightsController.getMonthlyHighlights.bind(MonthlyHighlightsController)
 );
 
 /**

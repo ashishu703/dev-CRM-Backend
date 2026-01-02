@@ -9,16 +9,46 @@ class DepartmentUser extends BaseModel {
   static VALID_DEPARTMENTS = null;
 
   static async create(userData) {
-    const { username, email, password, departmentType, companyName, headUserId, target = 0, createdBy } = userData;
+    const {
+      username,
+      email,
+      password,
+      departmentType,
+      companyName,
+      headUserId,
+      target = 0,
+      targetStartDate = null,
+      targetEndDate = null,
+      targetDurationDays = null,
+      createdBy
+    } = userData;
     
     this.validateData({ username, email, departmentType, companyName, headUserId });
     
     const hashedPassword = await bcrypt.hash(password, 12);
     
     const result = await this.query(
-      `INSERT INTO ${this.TABLE_NAME} (username, email, password, department_type, company_name, head_user_id, target, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [username, email, hashedPassword, departmentType, companyName, headUserId, target, createdBy]
+      `INSERT INTO ${this.TABLE_NAME} (
+          username, email, password,
+          department_type, company_name, head_user_id,
+          target, target_start_date, target_end_date, target_duration_days,
+          created_by
+        )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING *`,
+      [
+        username,
+        email,
+        hashedPassword,
+        departmentType,
+        companyName,
+        headUserId,
+        target,
+        targetStartDate,
+        targetEndDate,
+        targetDurationDays,
+        createdBy
+      ]
     );
 
     return new this(result.rows[0]);

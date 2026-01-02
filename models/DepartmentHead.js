@@ -1,5 +1,6 @@
 const BaseModel = require('./BaseModel');
 const bcrypt = require('bcryptjs');
+const { parseToLocalDate, toDateOnly } = require('../utils/dateOnly');
 
 class DepartmentHead extends BaseModel {
   static TABLE_NAME = 'department_heads';
@@ -13,7 +14,10 @@ class DepartmentHead extends BaseModel {
     this.validateData({ username, email, departmentType, companyName, target });
     
     const hashedPassword = await bcrypt.hash(password, 12);
-    const targetStartDate = target && parseFloat(target) > 0 ? new Date().toISOString() : null;
+    // Normalize target start date to month start (so monthly targets align even if set mid-month)
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const targetStartDate = target && parseFloat(target) > 0 ? toDateOnly(monthStart) : null;
     
     const result = await this.query(
       `INSERT INTO ${this.TABLE_NAME} (username, email, password, department_type, company_name, target, target_start_date, created_by)
@@ -152,7 +156,9 @@ class DepartmentHead extends BaseModel {
     
     // Set target_start_date when target is updated (new monthly target assignment)
     if (targetUpdated) {
-      mapped.target_start_date = new Date().toISOString();
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      mapped.target_start_date = toDateOnly(monthStart);
     }
     
     if (updateData.isActive !== undefined) mapped.is_active = updateData.isActive;
@@ -169,7 +175,8 @@ class DepartmentHead extends BaseModel {
   // Check if target is expired (30 days from target_start_date)
   isTargetExpired() {
     if (!this.target_start_date) return false;
-    const startDate = new Date(this.target_start_date);
+    const startDate = parseToLocalDate(this.target_start_date);
+    if (!startDate) return false;
     const now = new Date();
     
     // Target expires at end of the month it started
@@ -183,7 +190,7 @@ class DepartmentHead extends BaseModel {
   getTargetEndDate(allowFallback = false) {
     let referenceDate = null;
     if (this.target_start_date) {
-      referenceDate = new Date(this.target_start_date);
+      referenceDate = parseToLocalDate(this.target_start_date);
     } else if (allowFallback) {
       const now = new Date();
       referenceDate = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -248,15 +255,15 @@ class DepartmentHead extends BaseModel {
     if (this.target_start_date) {
       json.targetExpired = this.isTargetExpired();
       json.targetDaysRemaining = this.getTargetDaysRemaining(false);
-      json.targetStartDate = this.target_start_date;
+      json.targetStartDate = toDateOnly(this.target_start_date);
       const endDate = this.getTargetEndDate(false);
-      json.targetEndDate = endDate ? endDate.toISOString() : null;
+      json.targetEndDate = endDate ? toDateOnly(endDate) : null;
     } else {
       json.targetExpired = false;
       json.targetDaysRemaining = this.getTargetDaysRemaining(true);
       json.targetStartDate = null;
       const fallbackEndDate = this.getTargetEndDate(true);
-      json.targetEndDate = fallbackEndDate ? fallbackEndDate.toISOString() : null;
+      json.targetEndDate = fallbackEndDate ? toDateOnly(fallbackEndDate) : null;
     }
     
     return json;
