@@ -36,6 +36,10 @@ const reportsRoutes = require('./routes/reports');
 const app = express();
 const PORT = process.env.PORT || 4500;
 
+// Behind reverse proxies (Nginx/Cloudflare), trust X-Forwarded-* headers
+// This also helps Socket.IO / polling and rate-limit IP detection behave correctly.
+app.set('trust proxy', 1);
+
 // Security middleware - configure helmet to work with CORS
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -54,14 +58,24 @@ const getAllowedOrigins = () => {
     const productionOrigins = process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim());
     origins.push(...productionOrigins);
   }
+
+  // If explicit frontend URL is provided, include it (common in production envs)
+  if (process.env.FRONTEND_URL) {
+    origins.push(process.env.FRONTEND_URL.trim());
+  }
+  if (process.env.PUBLIC_URL) {
+    origins.push(process.env.PUBLIC_URL.trim());
+  }
   
   // In development mode, allow all origins
   if (process.env.NODE_ENV !== 'production') {
     return true;
   }
   
-  // In production, use the specific origins list
-  return origins.length > 0 ? origins : true;
+  // In production:
+  // - If ALLOWED_ORIGINS/FRONTEND_URL/PUBLIC_URL are not set, don't break Socket.IO by rejecting the site origin.
+  // - Fall back to allow all origins (the app still requires auth token for Socket.IO).
+  return origins.length > 0 ? Array.from(new Set(origins)) : true;
 };
 
 const corsOptions = {
@@ -196,6 +210,8 @@ const { Server } = require('socket.io');
 const notificationService = require('./services/notificationService');
 
 const io = new Server(server, {
+  path: '/socket.io',
+  transports: ['websocket', 'polling'],
   cors: {
     origin: (origin, callback) => {
       const allowedOrigins = getAllowedOrigins();
