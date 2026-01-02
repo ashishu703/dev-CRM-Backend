@@ -129,6 +129,7 @@ app.use('/api/marketing', marketingRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/notification', require('./routes/pushNotifications'));
 app.use('/api/admin', adminRoutes);
 
 /* =====================================================
