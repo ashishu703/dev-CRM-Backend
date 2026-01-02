@@ -6,6 +6,7 @@ class FirebaseService {
   constructor() {
     this.app = null;
     this.isInitialized = false;
+    this._noTokenLogCache = new Map(); // email -> lastLoggedAtMs
   }
 
   async initialize() {
@@ -78,7 +79,14 @@ class FirebaseService {
       const tokens = await FCMToken.getByUserEmail(userEmail);
 
       if (!tokens || tokens.length === 0) {
-        logger.warn(`No FCM tokens found for user: ${userEmail}`);
+        // Avoid noisy logs when broadcasting to many users: log at most once/hour per user.
+        const key = String(userEmail || '').toLowerCase().trim();
+        const now = Date.now();
+        const last = this._noTokenLogCache.get(key) || 0;
+        if (now - last > 60 * 60 * 1000) {
+          logger.warn(`No FCM tokens found for user: ${key}`);
+          this._noTokenLogCache.set(key, now);
+        }
         return { success: false, error: 'No tokens found' };
       }
 
