@@ -41,7 +41,7 @@ const app = express();
 const PORT = process.env.PORT || 4500;
 
 /* =====================================================
-   🔧 FIX 1: CREATE HTTP SERVER EARLY (VERY IMPORTANT)
+   CREATE HTTP SERVER EARLY 
 ===================================================== */
 const server = http.createServer(app);
 
@@ -59,7 +59,7 @@ app.use(helmet({
 }));
 
 /* =====================================================
-   CORS (KEEP AS IS – WORKING)
+                 CORS
 ===================================================== */
 const getAllowedOrigins = () => {
   if (process.env.NODE_ENV !== 'production') return true;
@@ -149,7 +149,7 @@ app.use(errorHandler);
 ===================================================== */
 const io = new Server(server, {
   path: '/socket.io',
-  transports: ['websocket'],        // 🔧 FORCE WS (important)
+  transports: ['websocket'],
   cors: {
     origin: [
       'https://anocabapp.com',

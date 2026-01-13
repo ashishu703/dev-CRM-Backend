@@ -9,10 +9,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=4500
-      # TRUSTED_IPS wali line sahi hai, isse rehne dein
       - TRUSTED_IPS=62.72.12.249
     env_file:
-      - .env  # Ab backend yahan se 'ALLOWED_ORIGINS' ki sahi value uthayega
+      - .env  
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
