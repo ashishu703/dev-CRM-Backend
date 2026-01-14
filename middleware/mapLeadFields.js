@@ -20,6 +20,7 @@ function mapSingleLead(input) {
     gstNo: input.gstNo !== undefined ? input.gstNo : (input.gstNumber !== undefined ? input.gstNumber : null),
     productNames: input.productNames !== undefined ? input.productNames : (input.productNamesText !== undefined ? input.productNamesText : (input['Product Name'] !== undefined ? input['Product Name'] : null)),
     state: input.state !== undefined ? input.state : null,
+    division: input.division !== undefined ? input.division : null,
     leadSource: input.leadSource !== undefined ? input.leadSource : (input.lead_type !== undefined ? input.lead_type : (input.leadType !== undefined ? input.leadType : null)),
     customerType: input.customerType || 'business',
     date: input.date || input.createdAt || input['Created'] || new Date().toISOString().split('T')[0],
