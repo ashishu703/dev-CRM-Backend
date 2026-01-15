@@ -7,7 +7,6 @@ const setupDatabase = async () => {
   try {
     logger.info('Starting database setup...');
 
-    // Create users table
     await query(`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -23,7 +22,6 @@ const setupDatabase = async () => {
       )
     `);
 
-    // Create review_criteria table
     await query(`
       CREATE TABLE IF NOT EXISTS review_criteria (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -36,7 +34,6 @@ const setupDatabase = async () => {
       )
     `);
 
-    // Create reviews table
     await query(`
       CREATE TABLE IF NOT EXISTS reviews (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -57,7 +54,6 @@ const setupDatabase = async () => {
       )
     `);
 
-    // Create review_scores table
     await query(`
       CREATE TABLE IF NOT EXISTS review_scores (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -70,7 +66,6 @@ const setupDatabase = async () => {
       )
     `);
 
-    // Create indexes for better performance
     await query('CREATE INDEX IF NOT EXISTS idx_reviews_user_id ON reviews(user_id)');
     await query('CREATE INDEX IF NOT EXISTS idx_reviews_status ON reviews(status)');
     await query('CREATE INDEX IF NOT EXISTS idx_reviews_category ON reviews(category)');
@@ -79,7 +74,6 @@ const setupDatabase = async () => {
     await query('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)');
     await query('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)');
 
-    // Insert default review criteria
     const criteriaData = [
       {
         name: 'Grammar and Spelling',
@@ -187,7 +181,6 @@ const setupDatabase = async () => {
       `, [criteria.name, criteria.description, criteria.weight, criteria.category]);
     }
 
-    // Create default admin user
     const adminPassword = await bcrypt.hash('Admin123!', 12);
     await query(`
       INSERT INTO users (username, email, password_hash, role, email_verified)
@@ -195,7 +188,6 @@ const setupDatabase = async () => {
       ON CONFLICT (email) DO NOTHING
     `, ['admin', 'admin@automaticreview.com', adminPassword, 'admin', true]);
 
-    // Create function to update updated_at timestamp
     await query(`
       CREATE OR REPLACE FUNCTION update_updated_at_column()
       RETURNS TRIGGER AS $$
@@ -206,7 +198,6 @@ const setupDatabase = async () => {
       $$ language 'plpgsql';
     `);
 
-    // Create triggers for updated_at
     await query(`
       DROP TRIGGER IF EXISTS update_users_updated_at ON users;
       CREATE TRIGGER update_users_updated_at
@@ -234,7 +225,6 @@ const setupDatabase = async () => {
   }
 };
 
-// Run setup if this file is executed directly
 if (require.main === module) {
   setupDatabase();
 }

@@ -11,7 +11,6 @@ async function runMigrations() {
       .filter((f) => f.endsWith('.sql'))
       .sort();
 
-    // Track applied migrations so we don't keep re‑running old ones
     await query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         id SERIAL PRIMARY KEY,
@@ -35,11 +34,9 @@ async function runMigrations() {
 
       logger.info(`Running migration: ${file}`);
 
-      // Run each migration in its own transaction so failures don't leave DB half‑applied
       await query('BEGIN');
       try {
         if (file === '035_payments_credits_and_fks.sql') {
-          // Run via JS to be portable
           logger.info('Executing 035_payments_credits_and_fks via JS helper');
           await run035();
         } else {
@@ -70,7 +67,6 @@ async function runMigrations() {
 }
 
 async function run035() {
-  // Create customer_credits
   await query(`
     CREATE TABLE IF NOT EXISTS customer_credits (
       id SERIAL PRIMARY KEY,
@@ -90,7 +86,6 @@ async function run035() {
       END IF;
     END $$;`);
 
-  // Quotations: paid_amount
   await query(`
     DO $$ BEGIN
       IF NOT EXISTS (
@@ -100,12 +95,10 @@ async function run035() {
       END IF;
     END $$;`);
 
-  // Payments: extra columns
   await query(`ALTER TABLE IF EXISTS payments ADD COLUMN IF NOT EXISTS customer_id INTEGER`);
   await query(`ALTER TABLE IF EXISTS payments ADD COLUMN IF NOT EXISTS applied_amount DECIMAL(15,2)`);
   await query(`ALTER TABLE IF EXISTS payments ADD COLUMN IF NOT EXISTS type VARCHAR(20) NOT NULL DEFAULT 'payment'`);
 
-  // Payments FKs
   await query(`
     DO $$ BEGIN
       IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='fk_payments_lead') THEN

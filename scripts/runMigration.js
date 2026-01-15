@@ -7,7 +7,6 @@ async function runMigration() {
   try {
     logger.info('Starting migration process...');
 
-    // This script is legacy. No-op to avoid running outdated migrations.
     logger.info('No-op: legacy migration script disabled. Use scripts/migrate.js for current migrations.');
 
     process.exit(0);
@@ -17,5 +16,4 @@ async function runMigration() {
   }
 }
 
-// Run the migration
 runMigration();
