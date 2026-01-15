@@ -14,14 +14,13 @@ class AuthService {
   /**
    * Map backend role/department to a strict UI user type for dashboard routing
    * @param {string} role - 'superadmin' | 'department_head' | 'department_user'
-   * @param {string|null} departmentType - e.g., 'marketing_sales', 'office_sales', 'production', 'Marketing Department'
+   * @param {string|null} departmentType - e.g., 'office_sales', 'production', 'HR Department'
    * @returns {string}
    */
   mapUiUserType(role, departmentType) {
     const dept = (departmentType || '').toLowerCase();
     if (role === 'superadmin') return 'superadmin';
     if (role === 'department_head') {
-      if (dept === 'marketing_sales' || dept === 'marketing department') return 'marketingdepartmenthead';
       if (dept === 'hr' || dept === 'human resources') return 'hrdepartmenthead';
       if (dept === 'production' || dept === 'production department') return 'productiondepartmenthead';
       if (dept === 'accounts' || dept === 'accounts department') return 'accountsdepartmenthead';
@@ -30,7 +29,6 @@ class AuthService {
     }
     // department_user
     if (dept === 'production' || dept === 'production department') return 'production-staff';
-    if (dept === 'marketing_sales' || dept === 'marketing department') return 'marketing-salesperson';
     if (dept === 'accounts' || dept === 'accounts department') return 'accounts-user';
     if (dept === 'it' || dept === 'it department') return 'it-user';
     return 'salesperson';

@@ -19,21 +19,21 @@ const upload = require('../middleware/upload');
 
 router.use(protect);
 
-router.post('/', mapLeadFields, validateRequest(createLeadSchema), LeadController.create);
-router.get('/', validateRequest(querySchema, 'query'), LeadController.getAll);
-router.get('/stats', LeadController.getStats);
-router.get('/last-call', LeadController.getLastCallLeads);
+router.post('/', mapLeadFields, validateRequest(createLeadSchema), LeadController.create.bind(LeadController));
+router.get('/', validateRequest(querySchema, 'query'), LeadController.getAll.bind(LeadController));
+router.get('/stats', LeadController.getStats.bind(LeadController));
+router.get('/last-call', LeadController.getLastCallLeads.bind(LeadController));
 // Batch operations MUST come before parametric :id routes
-router.put('/batch', validateRequest(batchUpdateSchema), LeadController.batchUpdate);
-router.delete('/batch', validateRequest(bulkDeleteSchema), LeadController.bulkDelete);
-router.get('/:id', validateRequest(idParamSchema, 'params'), LeadController.getById);
+router.put('/batch', validateRequest(batchUpdateSchema), LeadController.batchUpdate.bind(LeadController));
+router.delete('/batch', validateRequest(bulkDeleteSchema), LeadController.bulkDelete.bind(LeadController));
+router.get('/:id', validateRequest(idParamSchema, 'params'), LeadController.getById.bind(LeadController));
 // IMPORTANT: Do not map fields on update to avoid overwriting existing data with blanks
-router.put('/:id', validateRequest([...idParamSchema, ...updateLeadSchema]), LeadController.update);
-router.delete('/:id', validateRequest(idParamSchema, 'params'), LeadController.delete);
+router.put('/:id', validateRequest([...idParamSchema, ...updateLeadSchema]), LeadController.update.bind(LeadController));
+router.delete('/:id', validateRequest(idParamSchema, 'params'), LeadController.delete.bind(LeadController));
 
-router.post('/:id/transfer', validateRequest(idParamSchema, 'params'), LeadController.transferLead);
+router.post('/:id/transfer', validateRequest(idParamSchema, 'params'), LeadController.transferLead.bind(LeadController));
 
-router.post('/import', mapLeadArray, validateRequest(importCSVSchema), LeadController.importCSV);
+router.post('/import', mapLeadArray, validateRequest(importCSVSchema), LeadController.importCSV.bind(LeadController));
 
 // Salesperson assigned leads for logged-in department_user or by username
 router.get('/assigned/salesperson', SalespersonLeadController.listForLoggedInUser);

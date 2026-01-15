@@ -24,7 +24,7 @@ const pool = new Pool({
   ...baseConfig,
   max: 50, 
   min: 5, 
-  idleTimeoutMillis: 30000, 
+  idleTimeoutMillis: 60000,
   connectionTimeoutMillis: 30000, 
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
@@ -33,8 +33,11 @@ const pool = new Pool({
   allowExitOnIdle: false 
 });
 
+let errorCount = 0;
+let lastErrorTime = 0;
+const ERROR_LOG_THROTTLE_MS = 60000;
+
 pool.on('connect', () => {
-  // Database connection established (logging removed for cleaner output)
 });
 
 pool.on('error', (err) => {
@@ -43,12 +46,22 @@ pool.on('error', (err) => {
                            errorMsg.includes('connection terminated unexpectedly') ||
                            err?.code === 'EADDRNOTAVAIL' ||
                            err?.code === 'ECONNRESET';
-  
+    
   if (isConnectionError) {
-    logger.warn('Connection error on idle client (will retry)', { 
-      code: err?.code, 
-      message: errorMsg 
-    });
+    const now = Date.now();
+    if (now - lastErrorTime > ERROR_LOG_THROTTLE_MS) {
+      errorCount = 0;
+      lastErrorTime = now;
+    }
+    errorCount++;
+    
+    if (errorCount > 5) {
+      logger.debug('Connection error on idle client (pool will auto-reconnect)', { 
+        code: err?.code, 
+        message: errorMsg,
+        errorCount 
+      });
+    }
     return;
   }
   
@@ -75,6 +88,25 @@ const isTransientDbError = (err) => {
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const checkPoolHealth = async () => {
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch (error) {
+    logger.debug('Pool health check failed', { error: error.message });
+    return false;
+  }
+};
+
+if (typeof setInterval !== 'undefined') {
+  setInterval(async () => {
+    const isHealthy = await checkPoolHealth();
+    if (!isHealthy) {
+      logger.debug('Pool health check indicates connection issues, pool will auto-recover');
+    }
+  }, 5 * 60 * 1000);
+}
+
 const query = async (text, params) => {
   const maxRetries = 5; 
   const start = Date.now();
@@ -88,10 +120,24 @@ const query = async (text, params) => {
     } catch (error) {
       attempt += 1;
       const transient = isTransientDbError(error);
-      logger.error('Database query error', { text, error: error.message, attempt, transient });
+      
       if (!transient || attempt >= maxRetries) {
+        logger.error('Database query error', { 
+          text: text.substring(0, 100),
+          error: error.message, 
+          attempt, 
+          transient 
+        });
         throw error;
       }
+      
+      if (attempt === 1) {
+        logger.debug('Transient database error, retrying', { 
+          error: error.message, 
+          attempt 
+        });
+      }
+      
       const backoff = Math.min(100 * Math.pow(2, attempt - 1) + Math.random() * 100, 2000);
       await delay(backoff);
     }
@@ -123,8 +169,28 @@ const getClient = async () => {
   return client;
 };
 
+const gracefulShutdown = async () => {
+  try {
+    logger.info('Closing database pool...');
+    await pool.end();
+    logger.info('Database pool closed successfully');
+  } catch (error) {
+    logger.error('Error closing database pool', error);
+  }
+};
+
+if (typeof process !== 'undefined') {
+  process.on('SIGTERM', gracefulShutdown);
+  process.on('SIGINT', gracefulShutdown);
+  process.on('uncaughtException', (error) => {
+    logger.error('Uncaught exception', error);
+    gracefulShutdown().then(() => process.exit(1));
+  });
+}
+
 module.exports = {
   query,
   getClient,
-  pool
+  pool,
+  gracefulShutdown
 };
