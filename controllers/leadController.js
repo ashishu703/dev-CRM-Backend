@@ -356,7 +356,6 @@ class LeadController {
           [id]
         );
 
-        // Note: We do NOT delete marketing_check_ins or marketing_meetings
         // These should remain so they can be displayed in the calendar with a "deleted" mark
 
         await client.query('COMMIT');
@@ -458,45 +457,11 @@ class LeadController {
       // Import into department_head_leads for DH workflow
       const result = await DepartmentHeadLead.bulkCreateFromUi(sanitizedLeads, req.user.email);
 
-      // Sync salesperson leads and create meetings for all inserted rows, if any assignments exist
+      // Sync salesperson leads for all inserted rows, if any assignments exist
       if (result && result.rows && result.rows.length) {
-        const MarketingMeeting = require('../models/MarketingMeeting');
         for (const row of result.rows) {
           try {
-          await leadAssignmentService.syncSalespersonLead(row.id);
-            
-            // Create meeting for imported lead if assigned to a salesperson
-            if (row.assigned_salesperson || row.assignedSalesperson) {
-              try {
-                const assignedSalesperson = row.assigned_salesperson || row.assignedSalesperson;
-                const meetingDate = row.date || new Date().toISOString().split('T')[0];
-                const leadAddress = row.address || 'Address not provided';
-                const meeting_id = await MarketingMeeting.generateMeetingId();
-                
-                await MarketingMeeting.create({
-                  meeting_id,
-                  customer_id: row.id,
-                  lead_id: row.id,
-                  customer_name: row.customer || row.customer_name || row.name || 'N/A',
-                  customer_phone: row.phone || null,
-                  customer_email: row.email || null,
-                  address: leadAddress,
-                  city: row.city || null,
-                  state: row.state || null,
-                  pincode: row.pincode || null,
-                  assigned_to: assignedSalesperson,
-                  assigned_by: req.user.email || req.user.username || 'unknown',
-                  meeting_date: meetingDate,
-                  meeting_time: null,
-                  scheduled_date: meetingDate,
-                  status: 'Scheduled',
-                  notes: `Imported and assigned from CSV`
-                });
-              } catch (meetingError) {
-                logger.error(`Error creating meeting for imported lead ${row.id}:`, meetingError);
-                // Don't block import if meeting creation fails
-              }
-            }
+            await leadAssignmentService.syncSalespersonLead(row.id);
           } catch (syncError) {
             logger.error(`Error syncing lead ${row.id}:`, syncError);
             // Continue with other leads even if one fails
