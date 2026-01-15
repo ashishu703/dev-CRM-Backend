@@ -539,6 +539,109 @@ class DepartmentHeadLead extends BaseModel {
     };
   }
 
+  /**
+   * Get last call leads with optimized query - single query, no N+1
+   * Filters leads that have follow-up status/remark OR scheduled dates <= today
+   */
+  async getLastCallLeads(filters = {}, pagination = {}) {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    const todayStr = today.toISOString().split('T')[0];
+
+    const baseQuery = `
+      SELECT DISTINCT
+        dhl.id, dhl.customer_id, dhl.customer, dhl.email, dhl.business, dhl.lead_source, 
+        COALESCE(dhl.product_names, sl.product_type) AS product_names, dhl.category,
+        dhl.sales_status, dhl.created, dhl.telecaller_status, dhl.payment_status,
+        dhl.phone, COALESCE(dhl.address, sl.address) AS address, dhl.gst_no, 
+        COALESCE(dhl.state, sl.state) AS state, dhl.customer_type, dhl.date,
+        dhl.whatsapp, dhl.assigned_salesperson, dhl.assigned_telecaller,
+        dhl.created_by, dhl.created_at, dhl.updated_at,
+        sl.follow_up_status AS follow_up_status,
+        sl.follow_up_remark AS follow_up_remark,
+        sl.follow_up_date AS follow_up_date,
+        sl.follow_up_time AS follow_up_time,
+        sl.sales_status_remark AS sales_status_remark,
+        (SELECT meeting_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1) AS next_meeting_date,
+        (SELECT meeting_time FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1) AS next_meeting_time,
+        (SELECT scheduled_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1) AS scheduled_date,
+        (SELECT meeting_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1) AS meeting_date,
+        (SELECT meeting_time FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1) AS meeting_time
+      FROM department_head_leads dhl
+      LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE COALESCE(dhl.is_deleted, FALSE) = FALSE
+    `;
+
+    const builder = new QueryBuilder();
+    
+    // Apply user filters
+    if (filters.createdBy) {
+      builder.addCondition('dhl.created_by', filters.createdBy);
+    }
+    if (filters.departmentType) {
+      builder.addCondition('dh.department_type', filters.departmentType);
+    }
+    if (filters.companyName) {
+      builder.addCondition('dh.company_name', filters.companyName);
+    }
+
+    // Last call filtering logic - must have follow-up OR scheduled date <= today
+    builder.values.push(todayStr);
+    const todayParam = builder.paramCount++;
+    
+    builder.conditions.push(`(
+      (sl.follow_up_status IS NOT NULL AND sl.follow_up_status != '' AND sl.follow_up_status != 'N/A')
+      OR (sl.follow_up_remark IS NOT NULL AND sl.follow_up_remark != '' AND sl.follow_up_remark != 'N/A')
+      OR (sl.follow_up_time IS NOT NULL)
+      OR (sl.follow_up_date IS NOT NULL AND sl.follow_up_date <= $${todayParam})
+      OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.meeting_date IS NOT NULL AND mm.meeting_date <= $${todayParam}))
+      OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.scheduled_date IS NOT NULL AND mm.scheduled_date <= $${todayParam}))
+      OR (sl.sales_status = 'next_meeting' AND sl.sales_status_remark IS NOT NULL AND sl.sales_status_remark != '')
+    )`);
+
+    // Build WHERE clause - need to use AND since baseQuery already has WHERE
+    const whereClause = builder.buildWhereClause();
+    const additionalConditions = whereClause ? whereClause.replace('WHERE', 'AND') : '';
+    let query = baseQuery + additionalConditions;
+    query += ' ORDER BY dhl.updated_at DESC';
+
+    const values = builder.getValues();
+    let paramCount = builder.getParamCount();
+
+    // Get total count first (for pagination)
+    const countWhereClause = builder.buildWhereClause();
+    const countAdditionalConditions = countWhereClause ? countWhereClause.replace('WHERE', 'AND') : '';
+    const countQuery = `
+      SELECT COUNT(DISTINCT dhl.id) as total
+      FROM department_head_leads dhl
+      LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE COALESCE(dhl.is_deleted, FALSE) = FALSE
+      ${countAdditionalConditions}
+    `;
+    const countResult = await DepartmentHeadLead.query(countQuery, values);
+    const total = parseInt(countResult.rows[0]?.total || 0);
+
+    // Apply pagination
+    if (pagination.limit) {
+      query += ` LIMIT $${paramCount}`;
+      values.push(pagination.limit);
+      paramCount++;
+    }
+
+    if (pagination.offset) {
+      query += ` OFFSET $${paramCount}`;
+      values.push(pagination.offset);
+    }
+
+    const result = await DepartmentHeadLead.query(query, values);
+    return {
+      rows: result.rows || [],
+      total
+    };
+  }
+
   buildGetAllQuery(filters, pagination) {
     const baseQuery = `
       SELECT 

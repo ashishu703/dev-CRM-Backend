@@ -22,6 +22,7 @@ router.use(protect);
 router.post('/', mapLeadFields, validateRequest(createLeadSchema), LeadController.create);
 router.get('/', validateRequest(querySchema, 'query'), LeadController.getAll);
 router.get('/stats', LeadController.getStats);
+router.get('/last-call', LeadController.getLastCallLeads);
 // Batch operations MUST come before parametric :id routes
 router.put('/batch', validateRequest(batchUpdateSchema), LeadController.batchUpdate);
 router.delete('/batch', validateRequest(bulkDeleteSchema), LeadController.bulkDelete);
