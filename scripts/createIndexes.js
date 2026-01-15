@@ -1,5 +1,4 @@
-// OPTIMIZED: Database indexes for performance
-// Run this script to create all necessary indexes
+
 
 const { query } = require('../config/database');
 
@@ -7,7 +6,6 @@ async function createIndexes() {
   try {
     console.log('Creating database indexes...');
 
-    // Salesperson Leads indexes
     await query(`
       CREATE INDEX IF NOT EXISTS idx_salesperson_leads_assigned_salesperson 
       ON salesperson_leads(assigned_salesperson);
@@ -33,7 +31,6 @@ async function createIndexes() {
       ON salesperson_leads(created_at DESC);
     `);
 
-    // Department Head Leads indexes
     await query(`
       CREATE INDEX IF NOT EXISTS idx_dh_leads_created_by 
       ON department_head_leads(created_by);
@@ -54,7 +51,6 @@ async function createIndexes() {
       ON department_head_leads(created_at DESC);
     `);
 
-    // Quotations indexes
     await query(`
       CREATE INDEX IF NOT EXISTS idx_quotations_customer_id 
       ON quotations(customer_id);
@@ -75,7 +71,6 @@ async function createIndexes() {
       ON quotations(customer_id, status);
     `);
 
-    // Proforma Invoices indexes
     await query(`
       CREATE INDEX IF NOT EXISTS idx_pi_quotation_id 
       ON proforma_invoices(quotation_id);
@@ -96,7 +91,6 @@ async function createIndexes() {
       ON proforma_invoices(quotation_id, status);
     `);
 
-    // Payments indexes
     await query(`
       CREATE INDEX IF NOT EXISTS idx_payments_lead_id 
       ON payment_history(lead_id);
@@ -117,7 +111,6 @@ async function createIndexes() {
       ON payment_history(payment_date DESC);
     `);
 
-    // Composite indexes for common queries
     await query(`
       CREATE INDEX IF NOT EXISTS idx_sl_assigned_status 
       ON salesperson_leads(assigned_salesperson, sales_status);
@@ -140,7 +133,6 @@ async function createIndexes() {
   }
 }
 
-// Run if called directly
 if (require.main === module) {
   createIndexes()
     .then(() => {
