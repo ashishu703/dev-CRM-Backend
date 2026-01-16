@@ -608,6 +608,66 @@ class LeadController {
       });
     }
   }
+
+  // Get last call leads with optimized query and pagination
+  async getLastCallLeads(req, res) {
+    try {
+      const {
+        page = 1,
+        limit = 50,
+        departmentType
+      } = req.query;
+
+      const filters = {};
+      
+      const isSuperAdmin = req.user.role === 'SUPERADMIN' || req.user.role === 'superadmin';
+      
+      if (isSuperAdmin && departmentType) {
+        filters.departmentType = departmentType;
+      }
+      
+      if (!isSuperAdmin) {
+        if (departmentType) {
+          filters.departmentType = departmentType;
+          if (req.user.companyName) {
+            filters.companyName = req.user.companyName;
+          }
+        } else {
+          filters.createdBy = req.user.email;
+          if (req.user.departmentType) {
+            filters.departmentType = req.user.departmentType;
+          }
+          if (req.user.companyName) {
+            filters.companyName = req.user.companyName;
+          }
+        }
+      }
+
+      const pagination = {
+        limit: Math.min(parseInt(limit), 100), // Max 100 per page
+        offset: (parseInt(page) - 1) * Math.min(parseInt(limit), 100)
+      };
+
+      const result = await DepartmentHeadLead.getLastCallLeads(filters, pagination);
+
+      res.json({
+        success: true,
+        data: result.rows || [],
+        pagination: {
+          page: parseInt(page),
+          limit: pagination.limit,
+          total: result.total || 0
+        }
+      });
+    } catch (error) {
+      logger.error('Error fetching last call leads:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch last call leads',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new LeadController();

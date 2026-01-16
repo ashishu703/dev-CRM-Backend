@@ -264,8 +264,22 @@ class SalespersonLeadController {
       });
 
       // Normalize to DH UI rows - only import data from CSV headers, no auto-assignment
-      const rows = leads.map((l) => {
+      const rows = leads.map((l, idx) => {
         const customerType = l.customer_type || l.customerType || null;
+        
+        // Extract division with proper handling
+        const divisionRaw = l.division || l.Division || null;
+        const division = divisionRaw && String(divisionRaw).trim() ? String(divisionRaw).trim() : null;
+        
+        // Debug division in development
+        if (process.env.NODE_ENV === 'development' && idx === 0) {
+          console.log('[Salesperson Import] Division debug for first lead:', {
+            raw: l.division,
+            processed: division,
+            leadKeys: Object.keys(l)
+          });
+        }
+        
         return {
           customerId: l.customerId || null,
           customer: l.name || l.customer || null,
@@ -280,6 +294,7 @@ class SalespersonLeadController {
           address: l.address || null,
           gstNo: l.gst_no || l.gstNo || null,
           state: l.state || null,
+          division: division,
           customerType: customerType,
           date: l.date || null,
           whatsapp: l.whatsapp || null,

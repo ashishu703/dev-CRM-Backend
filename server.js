@@ -6,7 +6,6 @@ const path = require('path');
 const http = require('http');                 // 🔧 FIX
 const { Server } = require('socket.io');      // 🔧 FIX
 const compression = require('./middleware/compression');
-const { cacheMiddleware } = require('./middleware/cache');
 require('dotenv').config();
 
 const logger = require('./utils/logger');

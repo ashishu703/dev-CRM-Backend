@@ -102,15 +102,18 @@ class LeadAssignmentService {
 
     /**
      * Helper to preserve actual data from department_head_leads
-     * Returns actual value if present, null only if truly null/undefined
+     * Returns actual value if present, null only if truly null/undefined/empty/'N/A'
      * @param {*} value - Value from department_head_leads
      * @returns {string|null} - Actual value or null
      */
     const preserveData = (value) => {
       if (value === null || value === undefined) return null;
       const trimmed = String(value).trim();
-      // Preserve actual data even if it's 'N/A' (don't convert to null)
-      return trimmed === '' ? null : trimmed;
+      // Preserve actual data, but convert 'N/A' to null for optional fields
+      if (trimmed === '' || trimmed.toLowerCase() === 'n/a') {
+        return null;
+      }
+      return trimmed;
     };
 
     // Build upsert payload - preserve actual data from department_head_leads
