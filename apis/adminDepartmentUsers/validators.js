@@ -4,7 +4,6 @@ const createUserSchema = Joi.object({
   username: Joi.string().min(3).max(255).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(6).required(),
-  // Dynamic department label from frontend
   departmentType: Joi.string().min(1).max(100).required(),
   companyName: Joi.string().min(1).max(255).required(),
   role: Joi.string().valid('department_user', 'department_head').required(),
