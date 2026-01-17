@@ -509,7 +509,7 @@ class SalespersonLeadController {
           } else {
             // Create new enquiries - use lead's date, not follow_up_date
             // Use the lead's original date from department head table or salesperson table
-            const leadDate = dhLead.date || spLead.date || updatePayload.date || new Date().toISOString().split('T')[0];
+            const leadDate = dhLead.date || spLead.date || updatePayload.date || null;
             
             const enquiryData = {
               lead_id: id,

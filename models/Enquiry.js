@@ -209,7 +209,7 @@ class Enquiry extends BaseModel {
       enquired_products, // Array of {product, quantity, remark}
       salesperson,
       telecaller,
-      enquiry_date = new Date().toISOString().split('T')[0]
+      enquiry_date
     } = enquiryData;
 
     // Validate required fields
@@ -279,16 +279,24 @@ class Enquiry extends BaseModel {
         ? (enquiryData.other_product || 'Other')
         : productItem.product;
 
-      const sql = `
-        INSERT INTO enquiries (
-          lead_id, customer_name, business, address, state, division,
-          follow_up_status, follow_up_remark, sales_status, sales_status_remark,
-          enquired_product, product_quantity, product_remark,
-          salesperson, telecaller, enquiry_date
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-        RETURNING *
-      `;
-      
+      const columns = [
+        'lead_id',
+        'customer_name',
+        'business',
+        'address',
+        'state',
+        'division',
+        'follow_up_status',
+        'follow_up_remark',
+        'sales_status',
+        'sales_status_remark',
+        'enquired_product',
+        'product_quantity',
+        'product_remark',
+        'salesperson',
+        'telecaller'
+      ];
+
       const values = [
         lead_id,
         customer_name,
@@ -304,9 +312,21 @@ class Enquiry extends BaseModel {
         productItem.quantity || null,
         productItem.remark || null,
         salesperson || null,
-        telecaller || null,
-        enquiry_date
+        telecaller || null
       ];
+
+      if (enquiry_date) {
+        columns.push('enquiry_date');
+        values.push(enquiry_date);
+      }
+
+      const placeholders = values.map((_, idx) => `$${idx + 1}`).join(', ');
+      const sql = `
+        INSERT INTO enquiries (
+          ${columns.join(', ')}
+        ) VALUES (${placeholders})
+        RETURNING *
+      `;
 
       try {
         const result = await Enquiry.query(sql, values);

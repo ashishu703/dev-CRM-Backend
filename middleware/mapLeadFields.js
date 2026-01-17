@@ -23,7 +23,7 @@ function mapSingleLead(input) {
     division: input.division !== undefined ? input.division : null,
     leadSource: input.leadSource !== undefined ? input.leadSource : (input.lead_type !== undefined ? input.lead_type : (input.leadType !== undefined ? input.leadType : null)),
     customerType: input.customerType || 'business',
-    date: input.date || input.createdAt || input['Created'] || new Date().toISOString().split('T')[0],
+    date: input.date || input.createdAt || input['Created'] || null,
     connectedStatus: input.connectedStatus || 'pending',
     finalStatus: input.finalStatus || 'open',
     whatsapp: input.whatsapp || input.phone || input.mobileNumber || input.mobile || null,
