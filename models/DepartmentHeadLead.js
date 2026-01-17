@@ -652,6 +652,138 @@ class DepartmentHeadLead extends BaseModel {
     };
   }
 
+  async getLastCallSummary(filters = {}, pagination = {}) {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    const todayStr = today.toISOString().split('T')[0];
+
+    const baseQuery = `
+      SELECT
+        dhl.assigned_salesperson AS salesperson,
+        dhl.id AS lead_id,
+        dhl.customer AS customer,
+        dhl.phone AS phone,
+        dhl.email AS email,
+        dhl.business AS business,
+        sl.follow_up_status AS follow_up_status,
+        sl.follow_up_remark AS follow_up_remark,
+        sl.sales_status AS sales_status,
+        sl.sales_status_remark AS sales_status_remark,
+        COALESCE(
+          sl.follow_up_date,
+          (SELECT meeting_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1),
+          (SELECT scheduled_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1),
+          CASE
+            WHEN sl.sales_status = 'next_meeting' AND sl.sales_status_remark ~ '\\d{4}-\\d{2}-\\d{2}'
+              THEN to_date(substring(sl.sales_status_remark from '(\\d{4}-\\d{2}-\\d{2})'), 'YYYY-MM-DD')
+            ELSE NULL
+          END,
+          dhl.updated_at::date
+        ) AS call_date
+      FROM department_head_leads dhl
+      LEFT JOIN salesperson_leads sl ON sl.id = dhl.id
+      LEFT JOIN department_heads dh ON dh.email = dhl.created_by
+      WHERE COALESCE(dhl.is_deleted, FALSE) = FALSE
+    `;
+
+    const builder = new QueryBuilder();
+
+    if (filters.createdBy) {
+      builder.addCondition('dhl.created_by', filters.createdBy);
+    }
+    if (filters.departmentType) {
+      builder.addCondition('dh.department_type', filters.departmentType);
+    }
+    if (filters.companyName) {
+      builder.addCondition('dh.company_name', filters.companyName);
+    }
+
+    builder.values.push(todayStr);
+    const todayParam = builder.paramCount++;
+    builder.conditions.push(`(
+      (
+        (sl.follow_up_status IS NOT NULL AND sl.follow_up_status != '' AND sl.follow_up_status != 'N/A')
+        OR (sl.follow_up_remark IS NOT NULL AND sl.follow_up_remark != '' AND sl.follow_up_remark != 'N/A')
+        OR (sl.follow_up_time IS NOT NULL)
+        OR (sl.follow_up_date IS NOT NULL)
+        OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.meeting_date IS NOT NULL))
+        OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.scheduled_date IS NOT NULL))
+        OR (sl.sales_status = 'next_meeting' AND sl.sales_status_remark IS NOT NULL AND sl.sales_status_remark != '')
+      )
+      AND (
+        COALESCE(
+          sl.follow_up_date,
+          (SELECT meeting_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1),
+          (SELECT scheduled_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1),
+          CASE
+            WHEN sl.sales_status = 'next_meeting' AND sl.sales_status_remark ~ '\\d{4}-\\d{2}-\\d{2}'
+              THEN to_date(substring(sl.sales_status_remark from '(\\d{4}-\\d{2}-\\d{2})'), 'YYYY-MM-DD')
+            ELSE NULL
+          END,
+          dhl.updated_at::date
+        ) <= $${todayParam}
+      )
+    )`);
+
+    const whereClause = builder.buildWhereClause();
+    const additionalConditions = whereClause ? whereClause.replace('WHERE', 'AND') : '';
+
+    const filteredQuery = `
+      ${baseQuery}
+      ${additionalConditions}
+    `;
+
+    const values = builder.getValues();
+
+    const countQuery = `
+      SELECT COUNT(*) AS total
+      FROM (
+        SELECT 1
+        FROM (${filteredQuery}) q
+        WHERE q.salesperson IS NOT NULL AND q.call_date IS NOT NULL
+        GROUP BY q.call_date, q.salesperson
+      ) grouped
+    `;
+    const countResult = await DepartmentHeadLead.query(countQuery, values);
+    const total = Number(countResult.rows?.[0]?.total || 0);
+
+    const limit = Math.min(parseInt(pagination.limit || 50, 10), 100);
+    const offset = parseInt(pagination.offset || 0, 10);
+
+    const dataQuery = `
+      SELECT 
+        q.call_date, 
+        q.salesperson, 
+        COUNT(*)::int AS total_calls,
+        json_agg(
+          json_build_object(
+            'id', q.lead_id,
+            'customer', q.customer,
+            'phone', q.phone,
+            'email', q.email,
+            'business', q.business,
+            'follow_up_status', q.follow_up_status,
+            'follow_up_remark', q.follow_up_remark,
+            'sales_status', q.sales_status,
+            'sales_status_remark', q.sales_status_remark
+          ) ORDER BY q.lead_id ASC
+        ) AS leads
+      FROM (${filteredQuery}) q
+      WHERE q.salesperson IS NOT NULL AND q.call_date IS NOT NULL
+      GROUP BY q.call_date, q.salesperson
+      ORDER BY q.call_date DESC, q.salesperson ASC
+      LIMIT $${values.length + 1} OFFSET $${values.length + 2}
+    `;
+
+    const dataValues = [...values, limit, offset];
+    const dataResult = await DepartmentHeadLead.query(dataQuery, dataValues);
+
+    return {
+      rows: dataResult.rows || [],
+      total
+    };
+  }
+
   buildGetAllQuery(filters, pagination) {
     const baseQuery = `
       SELECT 
