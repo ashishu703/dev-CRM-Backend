@@ -586,18 +586,28 @@ class DepartmentHeadLead extends BaseModel {
       builder.addCondition('dh.company_name', filters.companyName);
     }
 
-    // Last call filtering logic - must have follow-up OR scheduled date <= today
+    // Last call filtering logic - include leads with activity, but only if call date <= today
     builder.values.push(todayStr);
     const todayParam = builder.paramCount++;
     
     builder.conditions.push(`(
-      (sl.follow_up_status IS NOT NULL AND sl.follow_up_status != '' AND sl.follow_up_status != 'N/A')
-      OR (sl.follow_up_remark IS NOT NULL AND sl.follow_up_remark != '' AND sl.follow_up_remark != 'N/A')
-      OR (sl.follow_up_time IS NOT NULL)
-      OR (sl.follow_up_date IS NOT NULL AND sl.follow_up_date <= $${todayParam})
-      OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.meeting_date IS NOT NULL AND mm.meeting_date <= $${todayParam}))
-      OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.scheduled_date IS NOT NULL AND mm.scheduled_date <= $${todayParam}))
-      OR (sl.sales_status = 'next_meeting' AND sl.sales_status_remark IS NOT NULL AND sl.sales_status_remark != '')
+      (
+        (sl.follow_up_status IS NOT NULL AND sl.follow_up_status != '' AND sl.follow_up_status != 'N/A')
+        OR (sl.follow_up_remark IS NOT NULL AND sl.follow_up_remark != '' AND sl.follow_up_remark != 'N/A')
+        OR (sl.follow_up_time IS NOT NULL)
+        OR (sl.follow_up_date IS NOT NULL)
+        OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.meeting_date IS NOT NULL))
+        OR (EXISTS (SELECT 1 FROM marketing_meetings mm WHERE (mm.lead_id = dhl.id OR mm.customer_id = dhl.id) AND mm.scheduled_date IS NOT NULL))
+        OR (sl.sales_status = 'next_meeting' AND sl.sales_status_remark IS NOT NULL AND sl.sales_status_remark != '')
+      )
+      AND (
+        COALESCE(
+          sl.follow_up_date,
+          (SELECT meeting_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1),
+          (SELECT scheduled_date FROM marketing_meetings WHERE (lead_id = dhl.id OR customer_id = dhl.id) ORDER BY meeting_date DESC NULLS LAST, scheduled_date DESC NULLS LAST LIMIT 1),
+          dhl.updated_at::date
+        ) <= $${todayParam}
+      )
     )`);
 
     // Build WHERE clause - need to use AND since baseQuery already has WHERE
