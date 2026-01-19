@@ -79,7 +79,17 @@ class WorkOrder extends BaseModel {
       status = 'pending',
       remarks,
       companyLogo,
-      preparedByUserId
+      preparedByUserId,
+      rfpRequestId,
+      rfpId,
+      sentToOperationsAt,
+      operationsStatus,
+      operationsAcknowledgedAt,
+      expectedOrderCreationDate,
+      operationsCancelledAt,
+      operationsCancelledBy,
+      operationsCancelReason,
+      quotationUuid
     } = workOrderData;
 
     // Generate work order number if not provided
@@ -106,12 +116,16 @@ class WorkOrder extends BaseModel {
         items, unit_rate, terms,
         raw_materials, quality_standards, special_instructions, priority,
         remarks, prepared_by, received_by, prepared_by_name, prepared_by_designation, prepared_by_user_id,
-        payment_id, quotation_id, lead_id, template_key, status
+        payment_id, quotation_id, lead_id, template_key, status,
+        rfp_request_id, rfp_id, sent_to_operations_at, operations_status,
+        operations_acknowledged_at, expected_order_creation_date, operations_cancelled_at,
+        operations_cancelled_by, operations_cancel_reason
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 
         $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, 
         $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, 
-        $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52
+        $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52,
+        $53, $54, $55, $56, $57, $58, $59, $60, $61
       ) RETURNING *
     `;
 
@@ -129,6 +143,11 @@ class WorkOrder extends BaseModel {
       }
       return null;
     };
+
+    const isUuid = (value) => typeof value === 'string'
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+    const finalQuotationUuid = isUuid(quotationUuid) ? quotationUuid : (isUuid(quotationId) ? quotationId : null);
 
     const values = [
       workOrderNumber,
@@ -179,10 +198,19 @@ class WorkOrder extends BaseModel {
       preparedBy?.designation || '',
       preparedByUserId || null,
       paymentId || null,
-      null, // quotation_id UUID - NULL for string quotation numbers
+      finalQuotationUuid,
       leadId || null,
       templateKey || null,
-      status
+      status,
+      rfpRequestId || null,
+      rfpId || null,
+      sentToOperationsAt || null,
+      operationsStatus || 'pending',
+      operationsAcknowledgedAt || null,
+      sanitizeDate(expectedOrderCreationDate),
+      operationsCancelledAt || null,
+      operationsCancelledBy || null,
+      operationsCancelReason || null
     ];
 
     return await WorkOrder.query(query, values);
@@ -327,6 +355,18 @@ class WorkOrder extends BaseModel {
       paramCount++;
     }
 
+    if (filters.operationsStatus) {
+      query += ` AND operations_status = $${paramCount}`;
+      values.push(filters.operationsStatus);
+      paramCount++;
+    }
+
+    if (filters.rfpRequestId) {
+      query += ` AND rfp_request_id = $${paramCount}`;
+      values.push(filters.rfpRequestId);
+      paramCount++;
+    }
+
     if (filters.isRevised !== undefined) {
       query += ` AND is_revised = $${paramCount}`;
       values.push(filters.isRevised);
@@ -354,7 +394,9 @@ class WorkOrder extends BaseModel {
     const allowedFields = [
       'customer_business_name', 'customer_buyer_name', 'customer_gst', 'customer_contact', 'customer_state',
       'payment_terms', 'transport_tc', 'dispatch_through', 'delivery_terms', 'material_type', 'delivery_location',
-      'raw_materials', 'quality_standards', 'special_instructions', 'priority', 'remarks', 'items', 'status'
+      'raw_materials', 'quality_standards', 'special_instructions', 'priority', 'remarks', 'items', 'status',
+      'rfp_request_id', 'rfp_id', 'sent_to_operations_at', 'operations_status', 'operations_acknowledged_at',
+      'expected_order_creation_date', 'operations_cancelled_at', 'operations_cancelled_by', 'operations_cancel_reason'
     ];
 
     allowedFields.forEach(field => {

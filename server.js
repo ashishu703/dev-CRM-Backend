@@ -29,11 +29,13 @@ const securityLogRoutes = require('./routes/securityLogs');
 const stockRoutes = require('./routes/stock');
 const inventoryRoutes = require('./routes/inventory');
 const workOrderRoutes = require('./routes/workOrders');
+const rfpRoutes = require('./routes/rfps');
 const salesOrderRoutes = require('./routes/salesOrders');
 const organizationRoutes = require('./routes/organizations');
 const tradeIndiaRoutes = require('./routes/tradeIndia');
 const reportsRoutes = require('./routes/reports');
 const notificationService = require('./services/notificationService');
+const productPriceRoutes = require('./routes/productPrices');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -122,11 +124,13 @@ app.use('/api/security-logs', securityLogRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/work-orders', workOrderRoutes);
+app.use('/api/rfps', rfpRoutes);
 app.use('/api/sales-orders', salesOrderRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/notification', require('./routes/pushNotifications'));
+app.use('/api/prices', productPriceRoutes);
 app.use('/api/admin', adminRoutes);
 
 /* =====================================================

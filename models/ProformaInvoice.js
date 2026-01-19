@@ -14,7 +14,7 @@ class ProformaInvoice extends BaseModel {
           SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'proforma_invoices'
         ) THEN
           CREATE TABLE proforma_invoices (
-            id SERIAL PRIMARY KEY,
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             pi_number VARCHAR(50) UNIQUE NOT NULL,
             quotation_id TEXT,
             customer_id TEXT,
@@ -27,7 +27,7 @@ class ProformaInvoice extends BaseModel {
             total_amount NUMERIC(12,2) DEFAULT 0,
             total_paid NUMERIC(12,2) DEFAULT 0,
             remaining_balance NUMERIC(12,2) DEFAULT 0,
-            template VARCHAR(255),
+            template VARCHAR(50) DEFAULT 'template1',
             dispatch_mode VARCHAR(50),
             transport_name VARCHAR(255),
             vehicle_number VARCHAR(100),

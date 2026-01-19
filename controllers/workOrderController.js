@@ -1,4 +1,5 @@
 const WorkOrder = require('../models/WorkOrder');
+const RfpRequest = require('../models/RfpRequest');
 const SalesOrder = require('../models/SalesOrder');
 const { validationResult } = require('express-validator');
 
@@ -156,7 +157,9 @@ class WorkOrderController {
       const filters = {
         paymentId: req.query.paymentId || req.query.payment_id,
         quotationId: req.query.quotationId || req.query.quotation_id,
-        status: req.query.status
+        status: req.query.status,
+        operationsStatus: req.query.operationsStatus || req.query.operations_status,
+        rfpRequestId: req.query.rfpRequestId || req.query.rfp_request_id
       };
 
       const workOrders = await WorkOrder.getAll(filters);
@@ -305,6 +308,86 @@ class WorkOrderController {
         message: 'Failed to delete work order',
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Operations acknowledgement
+   */
+  async acknowledge(req, res) {
+    try {
+      const { id } = req.params;
+      const { expectedOrderCreationDate } = req.body;
+      const updated = await WorkOrder.update(id, {
+        operations_status: 'acknowledged',
+        operations_acknowledged_at: new Date().toISOString(),
+        expected_order_creation_date: expectedOrderCreationDate || null
+      });
+
+      if (!updated) {
+        return res.status(404).json({ success: false, message: 'Work order not found' });
+      }
+
+      if (updated?.rfp_request_id) {
+        await RfpRequest.logAction(
+          updated.rfp_request_id,
+          'work_order_acknowledged',
+          req.user?.email || req.user?.username || 'system',
+          req.user?.role,
+          null,
+          { expectedOrderCreationDate: expectedOrderCreationDate || null }
+        );
+      }
+
+      res.json({ success: true, message: 'Work order acknowledged', data: updated });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Failed to acknowledge work order', error: error.message });
+    }
+  }
+
+  /**
+   * Operations cancellation
+   */
+  async cancel(req, res) {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+      if (!reason) {
+        return res.status(400).json({ success: false, message: 'Cancellation reason is required' });
+      }
+
+      const existing = await WorkOrder.getById(id);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Work order not found' });
+      }
+
+      const currentOpsStatus = (existing.operations_status || '').toLowerCase();
+      if (['in_production', 'completed'].includes(currentOpsStatus)) {
+        return res.status(409).json({ success: false, message: 'Work order cannot be cancelled after production start' });
+      }
+
+      const updated = await WorkOrder.update(id, {
+        status: 'cancelled',
+        operations_status: 'cancelled',
+        operations_cancelled_at: new Date().toISOString(),
+        operations_cancelled_by: req.user?.email || req.user?.username || 'system',
+        operations_cancel_reason: reason
+      });
+
+      if (updated?.rfp_request_id) {
+        await RfpRequest.logAction(
+          updated.rfp_request_id,
+          'work_order_cancelled',
+          req.user?.email || req.user?.username || 'system',
+          req.user?.role,
+          reason,
+          { workOrderId: updated.id, workOrderNumber: updated.work_order_number }
+        );
+      }
+
+      res.json({ success: true, message: 'Work order cancelled', data: updated });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Failed to cancel work order', error: error.message });
     }
   }
 

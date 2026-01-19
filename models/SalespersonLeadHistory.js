@@ -6,21 +6,30 @@ class SalespersonLeadHistory extends BaseModel {
   }
 
   async ensureSchema() {
-    const sql = `
-      CREATE TABLE IF NOT EXISTS salesperson_lead_history (
-        id SERIAL PRIMARY KEY,
-        lead_id INTEGER NOT NULL,
-        username VARCHAR(255),
-        follow_up_status VARCHAR(100),
-        follow_up_remark TEXT,
-        follow_up_date DATE,
-        follow_up_time TIME,
-        sales_status VARCHAR(50),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_sp_lead_hist_lead ON salesperson_lead_history(lead_id);
+    try {
+      const createTableSql = `
+        CREATE TABLE IF NOT EXISTS salesperson_lead_history (
+          id SERIAL PRIMARY KEY,
+          lead_id INTEGER NOT NULL,
+          username VARCHAR(255),
+          follow_up_status VARCHAR(100),
+          follow_up_remark TEXT,
+          follow_up_date DATE,
+          follow_up_time TIME,
+          sales_status VARCHAR(50),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
       `;
-    await SalespersonLeadHistory.query(sql);
+      await SalespersonLeadHistory.query(createTableSql);
+      await SalespersonLeadHistory.query(
+        'CREATE INDEX IF NOT EXISTS idx_sp_lead_hist_lead ON salesperson_lead_history(lead_id)'
+      );
+    } catch (error) {
+      if (error && error.code === '23505' && /pg_type_typname_nsp_index/.test(error.constraint || '')) {
+        return;
+      }
+      throw error;
+    }
   }
 
   async addEntry(leadId, payload, username = null) {

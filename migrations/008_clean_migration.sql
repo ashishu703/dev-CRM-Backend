@@ -1,6 +1,9 @@
 -- Clean migration: Drop old table and create new structure
 -- This migration replaces the problematic admin_department_users table
 
+-- Ensure required extensions are available
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Drop the old table completely
 DROP TABLE IF EXISTS admin_department_users CASCADE;
 

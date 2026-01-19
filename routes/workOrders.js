@@ -14,6 +14,8 @@ router.get('/:id', workOrderController.getById);
 router.put('/:id', workOrderController.update);
 router.delete('/:id', workOrderController.delete);
 router.patch('/:id/status', workOrderController.updateStatus);
+router.post('/:id/acknowledge', workOrderController.acknowledge);
+router.post('/:id/cancel', workOrderController.cancel);
 
 module.exports = router;
 
