@@ -417,6 +417,8 @@ class SalespersonLeadController {
       }
 
       const result = await SalespersonLead.updateById(id, updatePayload);
+      let enquiryProcessed = false;
+      let resolvedLeadRow = result?.row || null;
 
       // Record history when follow-up fields or sales_status present
       try {
@@ -438,6 +440,11 @@ class SalespersonLeadController {
           const EnquiryModel = require('../models/Enquiry');
           const EnquiryClass = EnquiryModel.Enquiry || EnquiryModel.constructor;
           
+          // Ensure we have lead data even if no update occurred
+          if (!resolvedLeadRow) {
+            resolvedLeadRow = await SalespersonLead.getById(id);
+          }
+          
           // Check if enquiries already exist for this lead
           const existingEnquiries = await EnquiryClass.query(
             'SELECT id, enquiry_date FROM enquiries WHERE lead_id = $1 LIMIT 1',
@@ -445,8 +452,9 @@ class SalespersonLeadController {
           );
           
           // Get lead data from both salesperson and department head tables
-          const spLead = result?.row || {};
-          const dhLead = dhRow || {};
+          const spLead = resolvedLeadRow || {};
+          const dhLeadId = spLead?.dh_lead_id || id;
+          const dhLead = dhRow || (await DepartmentHeadLead.getById(dhLeadId)) || {};
           
           // Get assigned salesperson and telecaller from department head lead
           const assignedSalesperson = dhLead.assigned_salesperson || username || null;
@@ -506,6 +514,7 @@ class SalespersonLeadController {
             );
             
             console.log(`Updated existing enquiry records for lead ${id} (preserved original enquiry_date: ${originalEnquiryDate})`);
+            enquiryProcessed = true;
           } else {
             // Create new enquiries - use lead's date, not follow_up_date
             // Use the lead's original date from department head table or salesperson table
@@ -533,6 +542,7 @@ class SalespersonLeadController {
             if (createdEnquiries && createdEnquiries.length > 0) {
               console.log(`Created ${createdEnquiries.length} enquiry records for lead ${id} with enquiry_date: ${leadDate}`);
             }
+            enquiryProcessed = true;
           }
         } catch (e) {
           console.error('Enquiry creation/update failed:', e);
@@ -578,6 +588,9 @@ class SalespersonLeadController {
         console.warn('DH sync skipped due to error:', syncError.message);
       }
       if (!result || result.rowCount === 0) {
+        if (enquiryProcessed && resolvedLeadRow) {
+          return res.json({ success: true, message: 'Enquiry saved successfully', data: resolvedLeadRow });
+        }
         return res.status(404).json({ success: false, message: 'Lead not found or no changes' });
       }
       return res.json({ success: true, message: 'Lead updated successfully', data: result.row });

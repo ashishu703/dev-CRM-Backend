@@ -3,6 +3,7 @@ const DepartmentHeadLead = require('../models/DepartmentHeadLead');
 const { validationResult } = require('express-validator');
 const leadAssignmentService = require('../services/leadAssignmentService');
 const SalespersonLead = require('../models/SalespersonLead');
+const Enquiry = require('../models/Enquiry');
 const notificationService = require('../services/notificationService');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
@@ -37,6 +38,66 @@ class LeadController {
 
       if (dhResult && dhResult.id) {
         await leadAssignmentService.syncSalespersonLead(dhResult.id);
+        
+        // Create enquiry records for DH-created leads (best effort, do not block)
+        try {
+          const rawProducts = req.body.enquired_products
+            || req.body.enquiredProducts
+            || req.body.productNames
+            || req.body.product_names;
+          
+          const products = (() => {
+            if (!rawProducts) return [];
+            if (Array.isArray(rawProducts)) {
+              return rawProducts
+                .map((p) => {
+                  if (typeof p === 'string') return { product: p.trim() };
+                  const name = (p.product || p.name || '').trim();
+                  return name ? { ...p, product: name } : null;
+                })
+                .filter(Boolean);
+            }
+            if (typeof rawProducts === 'string') {
+              return rawProducts
+                .split(',')
+                .map((p) => p.trim())
+                .filter(Boolean)
+                .map((p) => ({ product: p }));
+            }
+            return [];
+          })();
+          
+          if (products.length > 0) {
+            const fallbackAssignee = req.body.assigned_salesperson
+              || req.body.assignedSalesperson
+              || req.user?.username
+              || req.user?.email
+              || null;
+            
+            const enquiryData = {
+              lead_id: dhResult.id,
+              customer_name: req.body.customer || req.body.name || '',
+              business: req.body.business || null,
+              address: req.body.address || null,
+              state: req.body.state || null,
+              division: req.body.division || null,
+              follow_up_status: req.body.follow_up_status || req.body.followUpStatus || null,
+              follow_up_remark: req.body.follow_up_remark || req.body.followUpRemark || null,
+              sales_status: req.body.sales_status || req.body.salesStatus || null,
+              sales_status_remark: req.body.sales_status_remark || req.body.salesStatusRemark || null,
+              enquired_products: products,
+              salesperson: fallbackAssignee,
+              telecaller: req.body.assigned_telecaller || req.body.assignedTelecaller || null,
+              enquiry_date: req.body.date || null
+            };
+            
+            if (enquiryData.customer_name && enquiryData.customer_name.trim()) {
+              await Enquiry.createEnquiries(enquiryData);
+            }
+          }
+        } catch (enquiryError) {
+          logger.warn('Failed to create enquiries for DH lead:', enquiryError);
+        }
         
         await notificationService.notifyLeadCreated(dhResult, req.user.email);
         
