@@ -229,29 +229,23 @@ class RfpRequest extends BaseModel {
   }
 
   async approve(id, approverEmail, salespersonId) {
-    // Get the current RFP request with all its products
+    // Algorithm-based validation: Get and validate RFP
     const current = await this.getById(id);
-    if (!current) {
-      throw new Error('RFP request not found');
-    }
-
-    if (!current.products || current.products.length === 0) {
-      throw new Error('RFP request has no products');
+    const { validateRfpApproval } = require('../utils/rfpHelpers');
+    const validation = validateRfpApproval(current);
+    
+    if (!validation.isValid) {
+      throw new Error(validation.error);
     }
 
     const PricingRfpDecision = require('./PricingRfpDecision');
+    const { transformProductsForPricingDecision } = require('../utils/rfpHelpers');
     
     // ALWAYS generate new RFP ID on approval (one lead can have multiple RFP IDs)
     const rfpId = await PricingRfpDecision.generateRfpId(salespersonId);
     
-    // Convert products from child table to pricing decision format
-    const products = current.products.map(product => ({
-      productSpec: product.product_spec || '',
-      quantity: product.quantity || '',
-      length: product.length || '',
-      lengthUnit: product.length_unit || 'Mtr',
-      targetPrice: product.target_price ? String(product.target_price) : ''
-    }));
+    // Algorithm-based transformation: Convert products from child table to pricing decision format
+    const products = transformProductsForPricingDecision(current.products);
     
     // Create ONE pricing decision with ALL products from this RFP
     const decision = await PricingRfpDecision.createDecision({

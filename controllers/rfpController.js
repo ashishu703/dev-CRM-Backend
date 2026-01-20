@@ -2,6 +2,7 @@ const RfpRequest = require('../models/RfpRequest');
 const Quotation = require('../models/Quotation');
 const WorkOrder = require('../models/WorkOrder');
 const { query } = require('../config/database');
+const { validateRfpCreateRequest, validateRfpPermission } = require('../utils/rfpValidation');
 
 const normalizeDept = (value) => (value || '').toString().toLowerCase();
 const isDepartment = (user, keyword) => normalizeDept(user?.departmentType).includes(keyword);
@@ -9,71 +10,29 @@ const isDepartment = (user, keyword) => normalizeDept(user?.departmentType).incl
 class RfpController {
   async create(req, res) {
     try {
-      if (!isDepartment(req.user, 'sales') || req.user.role !== 'department_user') {
-        return res.status(403).json({ success: false, message: 'Only salespersons can raise RFP' });
+      // Algorithm-based permission validation
+      const permissionCheck = validateRfpPermission(req.user, 'create');
+      if (!permissionCheck.allowed) {
+        return res.status(403).json({ success: false, message: permissionCheck.error });
       }
 
-      // NEW API: Accept products array (one RFP with multiple products)
+      // Algorithm-based request validation
+      const validation = validateRfpCreateRequest(req.body);
+      if (!validation.isValid) {
+        return res.status(400).json({ 
+          success: false, 
+          message: validation.error,
+          field: validation.field
+        });
+      }
+
+      // Extract request data
       const { leadId, products, deliveryTimeline, specialRequirements } = req.body;
-      
-      // Backward compatibility: Also support old single product format
-      const { productSpec, quantity, availabilityStatus, masterRfpId } = req.body;
-      
-      // Debug logging - log everything
-      console.log('[RFP Create] Full request body:', JSON.stringify(req.body, null, 2));
-      console.log('[RFP Create] Parsed values:', {
-        leadId,
-        hasProducts: !!products,
-        productsType: Array.isArray(products) ? 'array' : typeof products,
-        productsLength: Array.isArray(products) ? products.length : 'N/A',
-        hasProductSpec: !!productSpec,
-        productsSample: Array.isArray(products) && products.length > 0 ? products[0] : null,
-        allKeys: Object.keys(req.body)
-      });
-      
-      // Validate leadId
-      if (!leadId) {
-        console.log('[RFP Create] ERROR: leadId is missing');
-        return res.status(400).json({ success: false, message: 'leadId is required' });
-      }
+      const { productSpec, quantity, availabilityStatus, masterRfpId } = req.body; // Backward compatibility
 
-      // New format: products array (preferred)
-      // Check if products exists and is a valid array
-      if (products !== undefined && products !== null) {
-        if (!Array.isArray(products)) {
-          console.log('[RFP Create] ERROR: products is not an array:', typeof products, products);
-          return res.status(400).json({ 
-            success: false, 
-            message: 'products must be an array' 
-          });
-        }
-        
-        if (products.length === 0) {
-          console.log('[RFP Create] ERROR: products array is empty');
-          return res.status(400).json({ 
-            success: false, 
-            message: 'products array cannot be empty' 
-          });
-        }
-        
-        console.log('[RFP Create] Processing products array with', products.length, 'items');
-        // Validate all products have required fields
-        for (let i = 0; i < products.length; i++) {
-          const product = products[i];
-          if (!product || !product.productSpec || (typeof product.productSpec === 'string' && product.productSpec.trim() === '')) {
-            return res.status(400).json({ 
-              success: false, 
-              message: `Product at index ${i} is missing productSpec. All products must have a valid productSpec.` 
-            });
-          }
-          if (!product.availabilityStatus || (typeof product.availabilityStatus === 'string' && product.availabilityStatus.trim() === '')) {
-            return res.status(400).json({ 
-              success: false, 
-              message: `Product at index ${i} (${product.productSpec}) is missing availabilityStatus. All products must have availabilityStatus.` 
-            });
-          }
-        }
-
+      // Algorithm-based processing: Handle new format (products array) or old format (productSpec)
+      if (products !== undefined && products !== null && Array.isArray(products) && products.length > 0) {
+        // New format: products array (preferred)
         // Create ONE RFP with multiple products
         const rfp = await RfpRequest.createRequest({
           leadId,
@@ -133,12 +92,10 @@ class RfpController {
         const rfpWithProducts = await RfpRequest.getById(rfp.id);
         res.status(201).json({ success: true, data: rfpWithProducts });
       } else {
-        // Neither products array nor productSpec provided
-        console.log('[RFP Create] ERROR: Neither products array nor productSpec provided');
-        console.log('[RFP Create] Request body keys:', Object.keys(req.body));
+        // This should not happen due to validation, but kept for safety
         return res.status(400).json({ 
           success: false, 
-          message: 'Either products array or productSpec is required. Received: ' + JSON.stringify(Object.keys(req.body))
+          message: 'Either products array or productSpec is required'
         });
       }
     } catch (error) {
