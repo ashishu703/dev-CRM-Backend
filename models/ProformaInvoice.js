@@ -184,14 +184,14 @@ class ProformaInvoice extends BaseModel {
           dispatch_mode, transport_name, vehicle_number, transport_id, lr_no,
           courier_name, consignment_no, by_hand, post_service,
           carrier_name, carrier_number,
-          created_by
+          created_by, master_rfp_id
         ) VALUES (
           $1, $2, $3, $4,
           $5, $6, $7,
           $8, $9, $10, $11,
           $12, $13, $14, $15, $16,
           $17, $18, $19, $20,
-          $21, $22, $23, $24
+          $21, $22, $23, $24, $25
         ) RETURNING *
       `;
       
@@ -233,7 +233,8 @@ class ProformaInvoice extends BaseModel {
         piData.post_service || piData.postService || null,          // $21 - post_service
         piData.carrier_name || piData.carrierName || null,          // $22 - carrier_name
         piData.carrier_number || piData.carrierNumber || null,      // $23 - carrier_number
-        piData.createdBy                                             // $24 - created_by
+        piData.createdBy,                                            // $24 - created_by
+        quotation.master_rfp_id || null                               // $25 - master_rfp_id (from quotation)
       ];
       
       const piResult = await client.query(piQuery, piValues);

@@ -23,10 +23,10 @@ class Quotation extends BaseModel {
           quotation_date, valid_until, branch,
           subtotal, tax_rate, tax_amount, discount_rate, discount_amount, total_amount,
           template, payment_mode, transport_tc, dispatch_through, delivery_terms, material_type,
-          bank_details, terms_sections, bill_to, remark, rfp_request_id, rfp_id
+          bank_details, terms_sections, bill_to, remark, rfp_request_id, rfp_id, master_rfp_id
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-          $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33
+          $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
         ) RETURNING *
       `;
       
@@ -63,7 +63,8 @@ class Quotation extends BaseModel {
         quotationData.billTo ? JSON.stringify(quotationData.billTo) : null,
         quotationData.remark || null,
         quotationData.rfpRequestId || null,
-        quotationData.rfpId || null
+        quotationData.rfpId || null,
+        quotationData.masterRfpId || null
       ];
       
       const quotationResult = await query(quotationQuery, quotationValues);
