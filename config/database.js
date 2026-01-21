@@ -1,7 +1,25 @@
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
 const logger = require('../utils/logger');
 
 require('dotenv').config();
+
+// ---- Timezone handling (CRITICAL) ----
+// Our DB schema uses many `TIMESTAMP` columns (without timezone). By default, Node/pg can
+// interpret these as local time, which causes a consistent ±5:30 shift for IST users.
+// We treat DB `TIMESTAMP` values as UTC instants so frontend can safely render them in IST.
+//
+// OID 1114 = timestamp without time zone
+const TIMESTAMP_OID = 1114;
+types.setTypeParser(TIMESTAMP_OID, (val) => {
+  if (val == null) return null;
+  const s = String(val).trim();
+  if (!s) return null;
+  // Normalize "YYYY-MM-DD HH:MM:SS(.ms)" -> "YYYY-MM-DDTHH:MM:SS(.ms)Z"
+  const isoLike = s.includes('T') ? s : s.replace(' ', 'T');
+  const withZ = /[zZ]$/.test(isoLike) || /[+-]\d{2}:?\d{2}$/.test(isoLike) ? isoLike : `${isoLike}Z`;
+  const d = new Date(withZ);
+  return Number.isNaN(d.getTime()) ? null : d;
+});
 
 const sslRequired = process.env.DB_SSL === 'require' || process.env.DB_SSL === 'true';
 const useConnectionString = !!process.env.DATABASE_URL;

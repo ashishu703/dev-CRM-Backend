@@ -38,15 +38,19 @@ class RfpRequest extends BaseModel {
       products, // Array of products
       deliveryTimeline,
       specialRequirements,
-      masterRfpId
+      masterRfpId,
+      pricingDecisionRfpId, // Link to pricing decision if RFP is raised from pricing decision section
+      source,
+      sourcePayload
     } = data;
 
     // Create ONE RFP request (parent record)
     const queryText = `
       INSERT INTO rfp_requests (
         lead_id, salesperson_id, created_by, department_type, company_name,
-        delivery_timeline, special_requirements, status, master_rfp_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_dh', $8)
+        delivery_timeline, special_requirements, status, master_rfp_id, pricing_decision_rfp_id,
+        source, source_payload
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending_dh', $8, $9, $10, $11)
       RETURNING *
     `;
     const values = [
@@ -57,7 +61,10 @@ class RfpRequest extends BaseModel {
       companyName || null,
       deliveryTimeline || null,
       specialRequirements || null,
-      masterRfpId || null
+      masterRfpId || null,
+      pricingDecisionRfpId || null,
+      source || null,
+      sourcePayload ? JSON.stringify(sourcePayload) : null
     ];
     const result = await RfpRequest.query(queryText, values);
     const rfpRequest = result.rows[0];
@@ -151,13 +158,19 @@ class RfpRequest extends BaseModel {
       WHERE 1=1
     `;
 
+    if (filters.salespersonId) {
+      queryText += ` AND r.salesperson_id = $${paramCount++}`;
+      values.push(filters.salespersonId);
+    }
+
     if (filters.status) {
       queryText += ` AND r.status = $${paramCount++}`;
       values.push(filters.status);
     }
 
     if (filters.createdBy) {
-      queryText += ` AND r.created_by = $${paramCount++}`;
+      // Use case-insensitive comparison to handle email case variations
+      queryText += ` AND LOWER(TRIM(r.created_by)) = LOWER(TRIM($${paramCount++}))`;
       values.push(filters.createdBy);
     }
 

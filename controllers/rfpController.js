@@ -27,31 +27,51 @@ class RfpController {
       }
 
       // Extract request data
-      const { leadId, products, deliveryTimeline, specialRequirements } = req.body;
+      const { leadId, products, deliveryTimeline, specialRequirements, pricingDecisionRfpId, source, sourcePayload } = req.body;
       const { productSpec, quantity, availabilityStatus, masterRfpId } = req.body; // Backward compatibility
+
+      // Check if there's a pricing decision for this lead (if not explicitly provided)
+      let pricingDecisionId = pricingDecisionRfpId;
+      if (!pricingDecisionId) {
+        const PricingRfpDecision = require('../models/PricingRfpDecision');
+        const pricingDecision = await PricingRfpDecision.getByLeadId(leadId);
+        if (pricingDecision && pricingDecision.rfp_id) {
+          pricingDecisionId = pricingDecision.rfp_id;
+        }
+      }
 
       // Algorithm-based processing: Handle new format (products array) or old format (productSpec)
       if (products !== undefined && products !== null && Array.isArray(products) && products.length > 0) {
         // New format: products array (preferred)
         // Create ONE RFP with multiple products
+        // Store all details from pricing decision section: products, delivery timeline, special requirements
         const rfp = await RfpRequest.createRequest({
           leadId,
           salespersonId: req.user.id,
           createdBy: req.user.email,
           departmentType: req.user.departmentType,
           companyName: req.user.companyName,
-          products: products,
-          deliveryTimeline,
-          specialRequirements
+          products: products, // All product details stored in rfp_request_products table
+          deliveryTimeline, // Delivery timeline stored
+          specialRequirements, // Special requirements stored
+          masterRfpId: masterRfpId || pricingDecisionId, // Link to master RFP or pricing decision
+          pricingDecisionRfpId: pricingDecisionId, // Link to pricing decision if exists
+          source: source || 'pricing_rfp_decision',
+          sourcePayload: sourcePayload || null
         });
 
         await RfpRequest.logAction(rfp.id, 'rfp_created', req.user.email, req.user.role, null, {
           productCount: products.length,
-          products: products.map(p => ({ productSpec: p.productSpec, quantity: p.quantity }))
+          products: products.map(p => ({ productSpec: p.productSpec, quantity: p.quantity })),
+          pricingDecisionRfpId: pricingDecisionId || null,
+          raisedFromPricingDecision: !!pricingDecisionId
         });
 
         // Return RFP with products
         const rfpWithProducts = await RfpRequest.getById(rfp.id);
+        
+        // (debug log removed) avoid noisy console logs in server
+        
         res.status(201).json({ success: true, data: rfpWithProducts });
       } 
       // Backward compatibility: Old single product format
@@ -65,6 +85,7 @@ class RfpController {
         }
 
         // Convert single product to array format for new structure
+        // Store all details from pricing decision section
         const rfp = await RfpRequest.createRequest({
           leadId,
           salespersonId: req.user.id,
@@ -78,9 +99,10 @@ class RfpController {
             lengthUnit: 'Mtr',
             availabilityStatus
           }],
-          deliveryTimeline,
-          specialRequirements,
-          masterRfpId
+          deliveryTimeline, // Delivery timeline stored
+          specialRequirements, // Special requirements stored
+          masterRfpId: masterRfpId || pricingDecisionId, // Link to master RFP or pricing decision
+          pricingDecisionRfpId: pricingDecisionId // Link to pricing decision if exists
         });
 
         await RfpRequest.logAction(rfp.id, 'rfp_created', req.user.email, req.user.role, null, {
@@ -107,8 +129,11 @@ class RfpController {
     try {
       const { status, search, page = 1, limit = 50 } = req.query;
       const filters = {};
-      if (status) filters.status = status;
-      if (search) filters.search = search;
+      // Frontend might accidentally send "undefined" as a string via query params.
+      const normalizedStatus = (status === 'undefined' || status === 'null') ? undefined : status;
+      const normalizedSearch = (search === 'undefined' || search === 'null') ? undefined : search;
+      if (normalizedStatus) filters.status = normalizedStatus;
+      if (normalizedSearch) filters.search = normalizedSearch;
 
       if (req.user?.role === 'superadmin') {
         // no extra filters
@@ -117,7 +142,8 @@ class RfpController {
           filters.departmentType = req.user.departmentType;
           if (req.user.companyName) filters.companyName = req.user.companyName;
         } else {
-          filters.createdBy = req.user.email;
+          // For salesperson view: filter by salesperson_id (more reliable than created_by/email)
+          filters.salespersonId = req.user.id;
         }
       } else if (req.user?.companyName) {
         filters.companyName = req.user.companyName;
@@ -129,6 +155,9 @@ class RfpController {
       };
 
       const data = await RfpRequest.list(filters, pagination);
+      
+      // (debug log removed) avoid noisy console logs in server
+      
       res.json({ success: true, data });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to fetch RFPs', error: error.message });
