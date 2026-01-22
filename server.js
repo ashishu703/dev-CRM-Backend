@@ -37,6 +37,7 @@ const tradeIndiaRoutes = require('./routes/tradeIndia');
 const reportsRoutes = require('./routes/reports');
 const notificationService = require('./services/notificationService');
 const productPriceRoutes = require('./routes/productPrices');
+const aaacCalculatorRoutes = require('./routes/aaacCalculator');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -133,6 +134,7 @@ app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/notification', require('./routes/pushNotifications'));
 app.use('/api/prices', productPriceRoutes);
+app.use('/api/aaac-calculator', aaacCalculatorRoutes);
 app.use('/api/admin', adminRoutes);
 
 /* =====================================================
