@@ -30,12 +30,14 @@ const stockRoutes = require('./routes/stock');
 const inventoryRoutes = require('./routes/inventory');
 const workOrderRoutes = require('./routes/workOrders');
 const rfpRoutes = require('./routes/rfps');
+const pricingRfpDecisionRoutes = require('./routes/pricingRfpDecisions');
 const salesOrderRoutes = require('./routes/salesOrders');
 const organizationRoutes = require('./routes/organizations');
 const tradeIndiaRoutes = require('./routes/tradeIndia');
 const reportsRoutes = require('./routes/reports');
 const notificationService = require('./services/notificationService');
 const productPriceRoutes = require('./routes/productPrices');
+const aaacCalculatorRoutes = require('./routes/aaacCalculator');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -125,19 +127,23 @@ app.use('/api/stock', stockRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/work-orders', workOrderRoutes);
 app.use('/api/rfps', rfpRoutes);
+app.use('/api/pricing-rfp-decisions', pricingRfpDecisionRoutes);
 app.use('/api/sales-orders', salesOrderRoutes);
 app.use('/api/organizations', organizationRoutes);
 app.use('/api/tradeindia', tradeIndiaRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/notification', require('./routes/pushNotifications'));
 app.use('/api/prices', productPriceRoutes);
+app.use('/api/aaac-calculator', aaacCalculatorRoutes);
 app.use('/api/admin', adminRoutes);
 
 /* =====================================================
    404
 ===================================================== */
 app.use('*', (req, res) => {
+  logger.warn(`404 - Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
+    success: false,
     error: 'Route not found',
     message: `Cannot ${req.method} ${req.originalUrl}`
   });

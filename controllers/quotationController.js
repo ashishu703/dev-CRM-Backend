@@ -53,7 +53,10 @@ class QuotationController {
         billTo: req.body.billTo || null,
         
         // Remark field
-        remark: req.body.remark || null
+        remark: req.body.remark || null,
+        
+        // Master RFP ID for tracking
+        masterRfpId: req.body.masterRfpId || null
       };
 
       console.log('💾 Saving quotation with data:', quotationData);
