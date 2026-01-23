@@ -2,7 +2,6 @@ const { query } = require('../config/database');
 const logger = require('../utils/logger');
 
 class AaacCalculator {
-  // Get all predefined AAAC products
   static async getAllProducts() {
     try {
       const result = await query(
@@ -15,7 +14,6 @@ class AaacCalculator {
     }
   }
 
-  // Get product by name
   static async getProductByName(name) {
     try {
       const result = await query(
@@ -29,63 +27,71 @@ class AaacCalculator {
     }
   }
 
-  // Get current variable prices (most recent active)
   static async getCurrentPrices() {
     try {
       const result = await query(
-        `SELECT * FROM aaac_variable_prices 
-         WHERE is_active = TRUE 
-         ORDER BY effective_date DESC 
-         LIMIT 1`
+        'SELECT * FROM aaac_variable_prices WHERE is_active = TRUE ORDER BY effective_date DESC LIMIT 1'
       );
       return result.rows[0] || null;
     } catch (error) {
-      logger.error('Error fetching current AAAC prices:', error);
+      logger.error('Error fetching current prices:', error);
       throw error;
     }
   }
 
-  // Update variable prices (by account department)
+  static async getPriceHistory() {
+    try {
+      const result = await query(
+        'SELECT * FROM aaac_variable_prices ORDER BY effective_date DESC'
+      );
+      return result.rows;
+    } catch (error) {
+      logger.error('Error fetching price history:', error);
+      throw error;
+    }
+  }
+
   static async updatePrices(aluPrice, alloyPrice, userId = null) {
     try {
-      // Deactivate old prices
-      await query(
-        'UPDATE aaac_variable_prices SET is_active = FALSE WHERE is_active = TRUE'
+      const existingPrice = await query(
+        'SELECT id FROM aaac_variable_prices WHERE effective_date = CURRENT_DATE'
       );
 
-      // Insert new prices or update if exists for today's date (UPSERT)
-      const result = await query(
-        `INSERT INTO aaac_variable_prices 
-         (alu_price_per_kg, alloy_price_per_kg, effective_date, created_by, is_active) 
-         VALUES ($1, $2, CURRENT_DATE, $3, TRUE) 
-         ON CONFLICT (effective_date) 
-         DO UPDATE SET
-           alu_price_per_kg = EXCLUDED.alu_price_per_kg,
-           alloy_price_per_kg = EXCLUDED.alloy_price_per_kg,
-           created_by = EXCLUDED.created_by,
-           is_active = TRUE,
-           updated_at = CURRENT_TIMESTAMP
-         RETURNING *`,
-        [aluPrice, alloyPrice, userId]
-      );
+      let result;
+      if (existingPrice.rows.length > 0) {
+        result = await query(
+          `UPDATE aaac_variable_prices 
+           SET alu_price_per_kg = $1, alloy_price_per_kg = $2, is_active = TRUE, 
+               updated_at = CURRENT_TIMESTAMP, created_by = $3
+           WHERE effective_date = CURRENT_DATE
+           RETURNING *`,
+          [aluPrice, alloyPrice, userId]
+        );
+      } else {
+        result = await query(
+          `INSERT INTO aaac_variable_prices 
+           (alu_price_per_kg, alloy_price_per_kg, effective_date, created_by, is_active) 
+           VALUES ($1, $2, CURRENT_DATE, $3, TRUE) 
+           RETURNING *`,
+          [aluPrice, alloyPrice, userId]
+        );
+      }
+
       return result.rows[0];
     } catch (error) {
-      logger.error('Error updating AAAC prices:', error);
+      logger.error('Error updating prices:', error);
       throw error;
     }
   }
 
-  // Calculate nominal area
   static calculateNominalArea(diameter, noOfStrands) {
     return diameter * diameter * 0.785 * noOfStrands * 1.02;
   }
 
-  // Calculate aluminium weight
   static calculateAluminiumWeight(diameter, noOfStrands) {
     return diameter * diameter * 0.785 * noOfStrands * 1.02 * 2.703;
   }
 
-  // Calculate cost of conductor (Aluminium) per meter
   static calculateCostAluminiumPerMtr(aluPrice, aluminiumWeight) {
     return (aluPrice * aluminiumWeight * 1.1) / 1000;
   }
