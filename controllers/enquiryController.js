@@ -23,10 +23,16 @@ class EnquiryController extends BaseController {
         { page: 1, limit: 1000 }
       );
 
-      const salespersonUsernames = (departmentSalespersons.data || departmentSalespersons.users || []).map(user => user.username || user.email).filter(Boolean);
+      const salespersonUsernames = (departmentSalespersons.data || departmentSalespersons.users || [])
+        .map(user => user.username || user.email)
+        .filter(Boolean);
+      
+      // Ensure department head can see enquiries they created/own
+      const headIdentifiers = [departmentHead.username, departmentHead.email].filter(Boolean);
+      const departmentIdentifiers = Array.from(new Set([...salespersonUsernames, ...headIdentifiers]));
 
       const filters = {
-        departmentSalespersons: salespersonUsernames,
+        departmentSalespersons: departmentIdentifiers,
         startDate: startDate || null,
         endDate: endDate || null,
         enquiryDate: enquiryDate || null

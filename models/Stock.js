@@ -41,7 +41,7 @@ class Stock extends BaseModel {
    * @returns {Promise<Object>} Updated/inserted stock record
    */
   async upsertStock(data) {
-    const { product_name, quantity, unit, status, updated_by } = data;
+    const { product_name, quantity, unit, status, rate, value, group, subgroup, updated_by } = data;
     
     // Determine status based on quantity if not provided
     let finalStatus = status;
@@ -56,19 +56,33 @@ class Stock extends BaseModel {
     }
     
     const sqlQuery = `
-      INSERT INTO stock (product_name, quantity, unit, status, updated_by)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO stock (product_name, quantity, unit, status, rate, value, "group", subgroup, updated_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       ON CONFLICT (product_name)
       DO UPDATE SET
         quantity = EXCLUDED.quantity,
         unit = EXCLUDED.unit,
         status = EXCLUDED.status,
+        rate = EXCLUDED.rate,
+        value = EXCLUDED.value,
+        "group" = EXCLUDED."group",
+        subgroup = EXCLUDED.subgroup,
         updated_by = EXCLUDED.updated_by,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *
     `;
     
-    const values = [product_name, quantity, unit || 'meters', finalStatus, updated_by];
+    const values = [
+      product_name, 
+      quantity || 0, 
+      unit || 'meters', 
+      finalStatus, 
+      rate || 0, 
+      value || 0,
+      group || '',
+      subgroup || '',
+      updated_by
+    ];
     const result = await query(sqlQuery, values);
     return result.rows[0];
   }
@@ -147,7 +161,7 @@ class Stock extends BaseModel {
     const results = [];
     
     for (const update of stockUpdates) {
-      const { product_name, quantity, unit, status, updated_by } = update;
+      const { product_name, quantity, unit, status, rate, value, group, subgroup, updated_by } = update;
       
       // Determine status based on quantity if not provided
       let finalStatus = status;
@@ -162,19 +176,33 @@ class Stock extends BaseModel {
       }
       
       const sqlQuery = `
-        INSERT INTO stock (product_name, quantity, unit, status, updated_by)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO stock (product_name, quantity, unit, status, rate, value, "group", subgroup, updated_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         ON CONFLICT (product_name)
         DO UPDATE SET
           quantity = EXCLUDED.quantity,
           unit = EXCLUDED.unit,
           status = EXCLUDED.status,
+          rate = EXCLUDED.rate,
+          value = EXCLUDED.value,
+          "group" = EXCLUDED."group",
+          subgroup = EXCLUDED.subgroup,
           updated_by = EXCLUDED.updated_by,
           updated_at = CURRENT_TIMESTAMP
         RETURNING *
       `;
       
-      const values = [product_name, quantity, unit || 'meters', finalStatus, updated_by];
+      const values = [
+        product_name, 
+        quantity || 0, 
+        unit || 'meters', 
+        finalStatus, 
+        rate || 0, 
+        value || 0,
+        group || '',
+        subgroup || '',
+        updated_by
+      ];
       const result = await query(sqlQuery, values);
       results.push(result.rows[0]);
     }
