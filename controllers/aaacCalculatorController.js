@@ -90,6 +90,24 @@ exports.updatePrices = async (req, res) => {
       userId
     );
 
+    // Broadcast price update to all connected clients via Socket.io
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.emit('aaac:prices:updated', {
+          alu_price_per_kg: updatedPrices.alu_price_per_kg,
+          alloy_price_per_kg: updatedPrices.alloy_price_per_kg,
+          effective_date: updatedPrices.effective_date,
+          updated_by: user?.email || 'system',
+          timestamp: new Date().toISOString()
+        });
+        logger.info(`✅ AAAC price update broadcasted: ALU=${updatedPrices.alu_price_per_kg}, ALLOY=${updatedPrices.alloy_price_per_kg}`);
+      }
+    } catch (socketError) {
+      logger.warn('Failed to broadcast price update via Socket.io:', socketError);
+      // Don't fail the request if Socket.io broadcast fails
+    }
+
     res.json({
       success: true,
       message: 'Prices updated successfully',

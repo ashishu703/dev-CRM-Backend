@@ -166,6 +166,9 @@ const io = new Server(server, {
   }
 });
 
+// Attach io to app for access in routes
+app.set('io', io);
+
 /* =====================================================
    SOCKET AUTH
 ===================================================== */
