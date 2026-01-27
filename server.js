@@ -38,6 +38,7 @@ const reportsRoutes = require('./routes/reports');
 const notificationService = require('./services/notificationService');
 const productPriceRoutes = require('./routes/productPrices');
 const aaacCalculatorRoutes = require('./routes/aaacCalculator');
+const rawMaterialRoutes = require('./routes/rawMaterials');
 
 const app = express();
 const PORT = process.env.PORT || 4500;
@@ -135,6 +136,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/notification', require('./routes/pushNotifications'));
 app.use('/api/prices', productPriceRoutes);
 app.use('/api/aaac-calculator', aaacCalculatorRoutes);
+app.use('/api/raw-materials', rawMaterialRoutes);
 app.use('/api/admin', adminRoutes);
 
 /* =====================================================
