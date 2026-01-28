@@ -191,14 +191,19 @@ class RfpController {
       }
 
       const { id } = req.params;
+      const { calculatorTotalPrice, calculatorDetail } = req.body || {};
       const current = await RfpRequest.getById(id);
       if (!current) {
         return res.status(404).json({ success: false, message: 'RFP not found' });
       }
 
-      const rfp = await RfpRequest.approve(id, req.user.email, current.salesperson_id);
+      const rfp = await RfpRequest.approve(id, req.user.email, current.salesperson_id, {
+        calculatorTotalPrice,
+        calculatorDetail
+      });
       await RfpRequest.logAction(rfp.id, 'rfp_approved', req.user.email, req.user.role, null, {
-        rfpId: rfp.rfp_id
+        rfpId: rfp.rfp_id,
+        calculator: calculatorDetail || null
       });
       res.json({ success: true, data: rfp });
     } catch (error) {

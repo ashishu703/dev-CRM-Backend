@@ -87,35 +87,51 @@ class PricingRfpDecisionController {
       // First check pricing_rfp_decisions
       let decision = await PricingRfpDecision.getByRfpId(rfpId);
       
-      // If not found, check rfp_requests (approved RFPs)
-      if (!decision) {
-        const RfpRequest = require('../models/RfpRequest');
-        const rfpRequest = await RfpRequest.getByRfpId(rfpId);
-        
-        if (rfpRequest && rfpRequest.status === 'approved') {
-          // Convert rfp_request to decision format for quotation creation
-          decision = {
-            rfp_id: rfpRequest.rfp_id,
-            lead_id: rfpRequest.lead_id,
-            salesperson_id: rfpRequest.salesperson_id,
-            created_by: rfpRequest.created_by,
-            department_type: rfpRequest.department_type,
-            company_name: rfpRequest.company_name,
-            products: [{
-              productSpec: rfpRequest.product_spec,
-              quantity: rfpRequest.quantity || '',
-              length: '',
-              lengthUnit: 'Mtr',
-              targetPrice: ''
-            }],
-            delivery_timeline: rfpRequest.delivery_timeline,
-            special_requirements: rfpRequest.special_requirements,
-            status: 'approved',
-            rfp_created: false,
-            created_at: rfpRequest.created_at,
-            updated_at: rfpRequest.updated_at
-          };
+      const RfpRequest = require('../models/RfpRequest');
+
+      // Also load matching RFP request (for calculator data, products, lead mapping)
+      const rfpRequest = await RfpRequest.getByRfpId(rfpId);
+      
+      // If no pricing decision exists, but we have an approved RFP request,
+      // convert rfp_requests row into a lightweight decision structure.
+      if (!decision && rfpRequest && rfpRequest.status === 'approved') {
+        decision = {
+          rfp_id: rfpRequest.rfp_id,
+          lead_id: rfpRequest.lead_id,
+          salesperson_id: rfpRequest.salesperson_id,
+          created_by: rfpRequest.created_by,
+          department_type: rfpRequest.department_type,
+          company_name: rfpRequest.company_name,
+          products: (rfpRequest.products || []).map((p) => ({
+            productSpec: p.product_spec,
+            quantity: p.quantity || '',
+            length: p.length || '',
+            lengthUnit: p.length_unit || 'Mtr',
+            targetPrice: p.target_price || ''
+          })),
+          delivery_timeline: rfpRequest.delivery_timeline,
+          special_requirements: rfpRequest.special_requirements,
+          status: 'approved',
+          rfp_created: false,
+          created_at: rfpRequest.created_at,
+          updated_at: rfpRequest.updated_at
+        };
+      }
+
+      // If we have an RFP request, always attach calculator data to the decision payload
+      if (rfpRequest) {
+        let calculatorLog = rfpRequest.calculator_pricing_log;
+        if (calculatorLog && typeof calculatorLog === 'string') {
+          try {
+            calculatorLog = JSON.parse(calculatorLog);
+          } catch (e) {
+            // leave as raw string if JSON.parse fails
+          }
         }
+        decision = decision || {};
+        decision.calculator_total_price = rfpRequest.calculator_total_price;
+        decision.calculator_pricing_log = calculatorLog;
+        decision.rfp_request = rfpRequest;
       }
       
       if (!decision) {
@@ -203,14 +219,15 @@ class PricingRfpDecisionController {
           dhl.business as lead_business,
           dhl.phone as lead_phone,
           dhl.email as lead_email,
+          rr.calculator_total_price,
+          rr.calculator_pricing_log,
           COUNT(DISTINCT rr.id) as rfp_request_count,
           STRING_AGG(DISTINCT rr.status, ', ') as rfp_statuses
         FROM pricing_rfp_decisions prd
         LEFT JOIN department_head_leads dhl ON prd.lead_id = dhl.id
-        LEFT JOIN rfp_requests rr ON rr.lead_id = prd.lead_id 
-          AND DATE(rr.created_at) = DATE(prd.created_at)
+        LEFT JOIN rfp_requests rr ON rr.rfp_id = prd.rfp_id
         WHERE DATE(prd.created_at) = $1
-        GROUP BY prd.id, dhl.customer, dhl.business, dhl.phone, dhl.email
+        GROUP BY prd.id, dhl.customer, dhl.business, dhl.phone, dhl.email, rr.calculator_total_price, rr.calculator_pricing_log
         ORDER BY prd.created_at DESC
         LIMIT $2 OFFSET $3
       `;
@@ -270,6 +287,8 @@ class PricingRfpDecisionController {
           prd.special_requirements,
           prd.status,
           prd.rfp_created,
+          rr.calculator_total_price,
+          rr.calculator_pricing_log,
           prd.created_at,
           prd.updated_at,
           dhl.customer as lead_name,
@@ -285,6 +304,7 @@ class PricingRfpDecisionController {
           END as record_type
         FROM pricing_rfp_decisions prd
         LEFT JOIN department_head_leads dhl ON prd.lead_id = dhl.id
+        LEFT JOIN rfp_requests rr ON rr.rfp_id = prd.rfp_id
         ORDER BY prd.created_at DESC
       `;
 

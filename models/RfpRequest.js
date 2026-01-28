@@ -241,9 +241,11 @@ class RfpRequest extends BaseModel {
     return rfps;
   }
 
-  async approve(id, approverEmail, salespersonId) {
+  async approve(id, approverEmail, salespersonId, options = {}) {
     // Algorithm-based validation: Get and validate RFP
     const current = await this.getById(id);
+    const calculatorTotalPrice = options.calculatorTotalPrice ?? null;
+    const calculatorDetail = options.calculatorDetail || null;
     const { validateRfpApproval } = require('../utils/rfpHelpers');
     const validation = validateRfpApproval(current);
     
@@ -283,11 +285,19 @@ class RfpRequest extends BaseModel {
           master_rfp_id = $1,
           approved_by = $2,
           approved_at = NOW(),
+          calculator_total_price = $4,
+          calculator_pricing_log = $5,
           updated_at = NOW()
       WHERE id = $3
       RETURNING *
     `;
-    const result = await RfpRequest.query(updateQuery, [rfpId, approverEmail, id]);
+    const result = await RfpRequest.query(updateQuery, [
+      rfpId,
+      approverEmail,
+      id,
+      calculatorTotalPrice,
+      calculatorDetail ? JSON.stringify(calculatorDetail) : null
+    ]);
     
     return result.rows[0] || null;
   }
