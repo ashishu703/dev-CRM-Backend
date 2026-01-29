@@ -35,19 +35,29 @@ class RawMaterialRate extends BaseModel {
           steel_rate: 0,
           pvc_st1_st2: 0,
           aluminium_alloy_grade_t4: 0,
+          master_batch_xlpe: 0,
+          master_batch_pvc: 0,
           last_updated: new Date()
         };
 
+        const fields = [
+          'aluminium_ec_grade', 'aluminium_cg_grade', 'pvc_rp_inner', 'pvc_rp_outer',
+          'aluminium_alloy', 'copper_lme_grade', 'xlpe', 'pvc_st1_type_a', 'pvc_st2',
+          'fr_pvc', 'frlsh_pvc', 'gi_wire_0_6mm', 'gi_wire_1_4mm', 'gi_armouring_strip',
+          'ld', 'steel_rate', 'pvc_st1_st2', 'aluminium_alloy_grade_t4',
+          'master_batch_xlpe', 'master_batch_pvc'
+        ];
+        const values = fields.map(f => defaultRates[f] ?? 0);
         await query(`
           INSERT INTO raw_material_rates (
             aluminium_ec_grade, aluminium_cg_grade, pvc_rp_inner, pvc_rp_outer,
             aluminium_alloy, copper_lme_grade, xlpe, pvc_st1_type_a, pvc_st2,
             fr_pvc, frlsh_pvc, gi_wire_0_6mm, gi_wire_1_4mm, gi_armouring_strip,
-            ld, steel_rate, pvc_st1_st2, aluminium_alloy_grade_t4, last_updated,
-            created_at, updated_at
+            ld, steel_rate, pvc_st1_st2, aluminium_alloy_grade_t4, master_batch_xlpe, master_batch_pvc,
+            last_updated, created_at, updated_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW()
-          )`, Object.values(defaultRates));
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW(), NOW()
+          )`, values);
 
         return defaultRates;
       }
@@ -72,7 +82,8 @@ class RawMaterialRate extends BaseModel {
         'aluminium_ec_grade', 'aluminium_cg_grade', 'pvc_rp_inner', 'pvc_rp_outer',
         'aluminium_alloy', 'copper_lme_grade', 'xlpe', 'pvc_st1_type_a', 'pvc_st2',
         'fr_pvc', 'frlsh_pvc', 'gi_wire_0_6mm', 'gi_wire_1_4mm', 'gi_armouring_strip',
-        'ld', 'steel_rate', 'pvc_st1_st2', 'aluminium_alloy_grade_t4'
+        'ld', 'steel_rate', 'pvc_st1_st2', 'aluminium_alloy_grade_t4',
+        'master_batch_xlpe', 'master_batch_pvc'
       ];
 
       const values = fields.map(field => parseFloat(rates[field]) || 0);

@@ -23,7 +23,8 @@ const updateRawMaterialRates = async (req, res) => {
       'aluminium_ec_grade', 'aluminium_cg_grade', 'pvc_rp_inner', 'pvc_rp_outer',
       'aluminium_alloy', 'copper_lme_grade', 'xlpe', 'pvc_st1_type_a', 'pvc_st2',
       'fr_pvc', 'frlsh_pvc', 'gi_wire_0_6mm', 'gi_wire_1_4mm', 'gi_armouring_strip',
-      'ld', 'steel_rate', 'pvc_st1_st2', 'aluminium_alloy_grade_t4'
+      'ld', 'steel_rate', 'pvc_st1_st2', 'aluminium_alloy_grade_t4',
+      'master_batch_xlpe', 'master_batch_pvc'
     ];
     
     Object.keys(rates).forEach(key => {
@@ -162,6 +163,7 @@ const getCurrentRates = async (req, res) => {
         aluminium_alloy: 0, copper_lme_grade: 0, xlpe: 0, pvc_st1_type_a: 0, pvc_st2: 0,
         fr_pvc: 0, frlsh_pvc: 0, gi_wire_0_6mm: 0, gi_wire_1_4mm: 0, gi_armouring_strip: 0,
         ld: 0, steel_rate: 0, pvc_st1_st2: 0, aluminium_alloy_grade_t4: 0,
+        master_batch_xlpe: 0, master_batch_pvc: 0,
         lastUpdated: null
       };
       return res.status(200).json({
@@ -191,6 +193,8 @@ const getCurrentRates = async (req, res) => {
       steel_rate: rates.steel_rate || 0,
       pvc_st1_st2: rates.pvc_st1_st2 || 0,
       aluminium_alloy_grade_t4: rates.aluminium_alloy_grade_t4 || 0,
+      master_batch_xlpe: rates.master_batch_xlpe || 0,
+      master_batch_pvc: rates.master_batch_pvc || 0,
       lastUpdated: rates.updated_at || rates.created_at
     };
     
