@@ -34,7 +34,8 @@ class Quotation extends BaseModel {
         quotationNumber,
         quotationData.customerId,
         quotationData.salespersonId,
-        quotationData.status || 'draft',
+        // Pricing is already decided upstream; quotation doesn't need DH approval
+        quotationData.status || 'approved',
         quotationData.createdBy,
         quotationData.customerName,
         quotationData.customerBusiness,
@@ -148,7 +149,8 @@ class Quotation extends BaseModel {
         remark: updateData.remark,
         rfp_request_id: updateData.rfpRequestId,
         rfp_id: updateData.rfpId,
-        status: 'draft',
+        // Do not force back to draft on edit; keep current unless explicitly changed
+        status: updateData.status,
         updated_at: new Date().toISOString()
       };
       
@@ -334,7 +336,7 @@ class Quotation extends BaseModel {
     
     const placeholderUserId = '00000000-0000-0000-0000-000000000001';
     const result = await query(queryText, [id, placeholderUserId]);
-    const quotation = result[0];
+    const quotation = result.rows?.[0];
     
     await this.logApprovalAction(id, 'submitted', submittedBy, 'salesperson', 'Quotation submitted for verification');
     
@@ -360,7 +362,7 @@ class Quotation extends BaseModel {
       `;
       
       const result = await query(queryText, [id, notes]);
-      const quotation = result[0];
+      const quotation = result.rows?.[0];
       
       try {
         await this.logApprovalAction(id, 'approved', approvedBy, 'department_head', notes);
@@ -394,7 +396,7 @@ class Quotation extends BaseModel {
       `;
       
       const result = await query(queryText, [id, notes]);
-      const quotation = result[0];
+      const quotation = result.rows?.[0];
       
       try {
         await this.logApprovalAction(id, 'rejected', rejectedBy, 'department_head', notes);
@@ -431,7 +433,7 @@ class Quotation extends BaseModel {
     const result = await query(queryText, [id, placeholderUserId]);
     await this.logSentAction(id, sentTo, sentVia, sentBy);
     
-    return result[0];
+    return result.rows?.[0];
   }
 
   async acceptByCustomer(id, acceptedBy) {

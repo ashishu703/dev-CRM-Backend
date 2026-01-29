@@ -33,7 +33,8 @@ class QuotationController {
         discountRate: req.body.discountRate || 0,
         discountAmount: req.body.discountAmount || 0,
         totalAmount: req.body.totalAmount,
-        status: req.body.status || 'draft',
+        // Pricing is already decided upstream; quotation doesn't require DH approval
+        status: req.body.status || 'approved',
         
         // NEW FIELDS - Template & Delivery/Payment Terms
         template: req.body.template || null,

@@ -91,14 +91,14 @@ const validateRfpApproval = (rfp) => {
       error: 'RFP request not found'
     }
   }
-  
+
   if (!rfp.products || !Array.isArray(rfp.products) || rfp.products.length === 0) {
     return {
       isValid: false,
       error: 'RFP request has no products'
     }
   }
-  
+
   return { isValid: true, error: '' }
 }
 

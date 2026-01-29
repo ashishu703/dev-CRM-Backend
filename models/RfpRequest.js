@@ -109,7 +109,7 @@ class RfpRequest extends BaseModel {
     if (rfp) {
       // Get products for this RFP
       const productsQuery = `
-        SELECT id, product_spec, quantity, length, length_unit, target_price, availability_status
+        SELECT id, product_spec, quantity, length, length_unit, target_price, availability_status, calculator_log
         FROM rfp_request_products
         WHERE rfp_request_id = $1
         ORDER BY id ASC
@@ -135,7 +135,7 @@ class RfpRequest extends BaseModel {
     if (rfp) {
       // Get products for this RFP
       const productsQuery = `
-        SELECT id, product_spec, quantity, length, length_unit, target_price, availability_status
+        SELECT id, product_spec, quantity, length, length_unit, target_price, availability_status, calculator_log
         FROM rfp_request_products
         WHERE rfp_request_id = $1
         ORDER BY id ASC
@@ -300,6 +300,51 @@ class RfpRequest extends BaseModel {
     ]);
     
     return result.rows[0] || null;
+  }
+
+  async setProductCalculatorPrice(rfpRequestId, productSpec, totalPrice, calculatorDetail = null) {
+    if (rfpRequestId == null || productSpec == null || productSpec === '') return null
+    const price = parseFloat(totalPrice)
+    if (!Number.isFinite(price) && totalPrice !== 0) return null
+    const spec = String(productSpec).trim()
+    const logJson = calculatorDetail != null ? JSON.stringify(calculatorDetail) : null
+    const queryText = `
+      UPDATE rfp_request_products
+      SET target_price = $1, calculator_log = $4, updated_at = NOW()
+      WHERE rfp_request_id = $2 AND TRIM(product_spec) = $3
+      RETURNING *
+    `
+    let result = await RfpRequest.query(queryText, [price, rfpRequestId, spec, logJson])
+    if (result.rows.length === 0) {
+      result = await RfpRequest.query(
+        `UPDATE rfp_request_products SET target_price = $1, calculator_log = $4, updated_at = NOW()
+         WHERE id = (SELECT id FROM rfp_request_products WHERE rfp_request_id = $2 AND TRIM(product_spec) ILIKE TRIM($3) LIMIT 1)
+         RETURNING *`,
+        [price, rfpRequestId, spec, logJson]
+      )
+    }
+    return result.rows[0] || null
+  }
+
+  async clearProductCalculatorPrice(rfpRequestId, productSpec) {
+    if (rfpRequestId == null || productSpec == null || productSpec === '') return null
+    const spec = String(productSpec).trim()
+    const queryText = `
+      UPDATE rfp_request_products
+      SET target_price = NULL, calculator_log = NULL, updated_at = NOW()
+      WHERE rfp_request_id = $1 AND TRIM(product_spec) = $2
+      RETURNING *
+    `
+    let result = await RfpRequest.query(queryText, [rfpRequestId, spec])
+    if (result.rows.length === 0) {
+      result = await RfpRequest.query(
+        `UPDATE rfp_request_products SET target_price = NULL, calculator_log = NULL, updated_at = NOW()
+         WHERE id = (SELECT id FROM rfp_request_products WHERE rfp_request_id = $1 AND TRIM(product_spec) ILIKE TRIM($2) LIMIT 1)
+         RETURNING *`,
+        [rfpRequestId, spec]
+      )
+    }
+    return result.rows[0] || null
   }
 
   async reject(id, rejectedBy, reason) {

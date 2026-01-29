@@ -10,6 +10,8 @@ router.post('/', rfpController.create);
 router.get('/:id', rfpController.getById);
 router.post('/:id/approve', rfpController.approve);
 router.post('/:id/reject', rfpController.reject);
+router.post('/:id/product-calculator-price', rfpController.setProductCalculatorPrice);
+router.post('/:id/product-calculator-price/clear', rfpController.clearProductCalculatorPrice);
 router.get('/:id/prices', rfpController.listPrices);
 router.post('/:id/prices', rfpController.addPrice);
 router.post('/:id/quotation', rfpController.generateQuotation);

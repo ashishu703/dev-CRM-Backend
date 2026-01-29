@@ -231,6 +231,53 @@ class RfpController {
     }
   }
 
+  async setProductCalculatorPrice(req, res) {
+    try {
+      if (!isDepartment(req.user, 'sales') || req.user.role !== 'department_head') {
+        return res.status(403).json({ success: false, message: 'Only Sales DH can set product calculator price' });
+      }
+      const { id } = req.params;
+      const { productSpec, totalPrice, calculatorDetail } = req.body || {};
+      const current = await RfpRequest.getById(id);
+      if (!current) {
+        return res.status(404).json({ success: false, message: 'RFP not found' });
+      }
+      const updated = await RfpRequest.setProductCalculatorPrice(id, productSpec, totalPrice, calculatorDetail);
+      if (!updated) {
+        return res.status(400).json({ success: false, message: 'Product not found for this RFP. Check product specification.' });
+      }
+      const refreshed = await RfpRequest.getById(id);
+      res.json({ success: true, data: refreshed });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message || 'Failed to set product price' });
+    }
+  }
+
+  async clearProductCalculatorPrice(req, res) {
+    try {
+      if (!isDepartment(req.user, 'sales') || req.user.role !== 'department_head') {
+        return res.status(403).json({ success: false, message: 'Only Sales DH can clear product calculator price' });
+      }
+      const { id } = req.params;
+      const { productSpec } = req.body || {};
+      const current = await RfpRequest.getById(id);
+      if (!current) {
+        return res.status(404).json({ success: false, message: 'RFP not found' });
+      }
+      if (!productSpec || String(productSpec).trim() === '') {
+        return res.status(400).json({ success: false, message: 'productSpec is required' });
+      }
+      const updated = await RfpRequest.clearProductCalculatorPrice(id, productSpec);
+      if (!updated) {
+        return res.status(400).json({ success: false, message: 'Product not found for this RFP.' });
+      }
+      const refreshed = await RfpRequest.getById(id);
+      res.json({ success: true, data: refreshed });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message || 'Failed to clear product price' });
+    }
+  }
+
   async addPrice(req, res) {
     try {
       if (!isDepartment(req.user, 'accounts')) {
