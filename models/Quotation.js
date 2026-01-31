@@ -2,6 +2,32 @@ const BaseModel = require('./BaseModel');
 const { query } = require('../config/database');
 const notificationService = require('../services/notificationService');
 
+function normalizeBankDetailsForApi(bankDetailsRaw, branchCode) {
+  if (!bankDetailsRaw) return null;
+  const details = typeof bankDetailsRaw === 'string' ? JSON.parse(bankDetailsRaw) : bankDetailsRaw;
+  const branchFallback = branchCode || 'ANODE';
+  const companyNameMap = { ANODE: 'ANODE ELECTRIC PVT. LTD.' };
+  let accountHolder =
+    details.accountHolderName ||
+    details.account_holder_name ||
+    companyNameMap[branchFallback] ||
+    branchFallback;
+  const strVal = String(accountHolder || '').trim();
+  if (!strVal || /^\d+$/.test(strVal) || strVal.length < 2) {
+    accountHolder = companyNameMap[branchFallback] || 'ANODE ELECTRIC PVT. LTD.';
+  }
+  return {
+    ...details,
+    accountHolderName: String(accountHolder),
+    account_holder_name: String(accountHolder),
+    branch: String(details.branch || details.branchName || ''),
+    branchName: String(details.branch || details.branchName || ''),
+    bankName: String(details.bankName || ''),
+    accountNumber: String(details.accountNumber || ''),
+    ifscCode: String(details.ifscCode || '')
+  };
+}
+
 class Quotation extends BaseModel {
   constructor() {
     super('quotations');
@@ -233,16 +259,28 @@ class Quotation extends BaseModel {
       itemsQuery = 'SELECT * FROM quotation_items WHERE quotation_id = $1 ORDER BY item_order';
       const itemsResult = await query(itemsQuery, [quotation.id]);
       quotation.items = itemsResult.rows;
+      if (quotation.bank_details != null) {
+        try {
+          quotation.bank_details = normalizeBankDetailsForApi(quotation.bank_details, quotation.branch);
+        } catch (e) {}
+      }
       return quotation;
     }
     
     const quotationResult = await query(quotationQuery, [id]);
     if (quotationResult.rows.length === 0) return null;
-    
+
     const quotation = quotationResult.rows[0];
     const itemsResult = await query(itemsQuery, [quotation.id]);
     quotation.items = itemsResult.rows;
-    
+
+    if (quotation.bank_details != null) {
+      try {
+        quotation.bank_details = normalizeBankDetailsForApi(quotation.bank_details, quotation.branch);
+      } catch (e) {
+        // keep original if parse fails
+      }
+    }
     return quotation;
   }
 

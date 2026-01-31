@@ -258,9 +258,88 @@ class ProformaInvoice extends BaseModel {
     }
   }
 
-  // Update PI by ID
+  /**
+   * Lightweight PI summary for fast View open. No joins, no products/payments.
+   * Original approved PI is never mutated; only revised PI (draft) is editable.
+   */
+  async getSummary(id) {
+    await this.ensureSchema();
+    const sql = 'SELECT * FROM proforma_invoices WHERE id = $1';
+    const result = await query(sql, [id]);
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Products for a PI: quotation items with amendment applied for revised PI.
+   * Does not mutate original PI or quotation; returns effective line items for display.
+   */
+  async getProducts(id) {
+    await this.ensureSchema();
+    const pi = await this.getById(id);
+    if (!pi) return null;
+    const quotationId = pi.quotation_id;
+    const itemsResult = await query(
+      'SELECT * FROM quotation_items WHERE quotation_id = $1 ORDER BY item_order',
+      [quotationId]
+    );
+    let items = itemsResult.rows || [];
+    if (pi.parent_pi_id && pi.amendment_detail) {
+      let detail;
+      try {
+        detail = typeof pi.amendment_detail === 'string' ? JSON.parse(pi.amendment_detail) : pi.amendment_detail;
+      } catch (e) {
+        detail = null;
+      }
+      if (detail) {
+        const removed = new Set((detail.removed_item_ids || []).map((x) => String(x)));
+        const reduced = (detail.reduced_items || []).reduce((acc, item) => {
+          const qid = item.quotation_item_id ?? item.quotationItemId;
+          if (qid != null) acc[String(qid)] = Number(item.quantity) || 0;
+          return acc;
+        }, {});
+        items = items
+          .filter((row) => !removed.has(String(row.id || row.quotation_item_id)))
+          .map((row) => {
+            const rid = String(row.id || row.quotation_item_id);
+            const oq = Number(row.quantity) || 1;
+            const oa = Number(row.taxable_amount ?? row.amount ?? row.total_amount ?? 0);
+            const qty = reduced[rid] !== undefined ? reduced[rid] : oq;
+            const amount = oq > 0 ? (oa / oq) * qty : 0;
+            return { ...row, quantity: qty, taxable_amount: amount, amount };
+          });
+      }
+    }
+    return { pi: { id: pi.id, quotation_id: pi.quotation_id, parent_pi_id: pi.parent_pi_id }, items };
+  }
+
+  /**
+   * Payments for a PI (by quotation_id). Lightweight; no PI row.
+   */
+  async getPaymentsOnly(id) {
+    await this.ensureSchema();
+    const pi = await this.getById(id);
+    if (!pi) return null;
+    const Payment = require('./Payment');
+    const rows = await Payment.getByQuotation(pi.quotation_id);
+    return rows || [];
+  }
+
+  /**
+   * Update PI by ID. Only draft PIs are editable; approved/superseded are read-only (audit-safe).
+   */
   async updateById(id, updateData) {
     await this.ensureSchema();
+    const existing = await this.getById(id);
+    if (!existing) return null;
+    const status = (existing.status || '').toLowerCase();
+    if (status === 'approved' || status === 'superseded') {
+      throw new Error('Approved PI is read-only. Create a revised PI to make changes.');
+    }
+    const approvableStatuses = ['draft', 'pending_approval', 'pending', 'sent_for_approval', 'sent'];
+    if (!approvableStatuses.includes(status)) {
+      throw new Error('Only draft or pending-approval PI can be updated.');
+    }
+
     const fields = [];
     const values = [];
     let paramCount = 1;
@@ -428,11 +507,188 @@ class ProformaInvoice extends BaseModel {
     return pi;
   }
 
-  // Get PIs by quotation
+  // Get PIs by quotation (original first, then revised PIs in chronological order; includes parent ref)
   async getByQuotation(quotationId) {
     await this.ensureSchema();
-    const sql = 'SELECT * FROM proforma_invoices WHERE quotation_id = $1 ORDER BY created_at DESC';
+    const sql = `
+      SELECT pi.*, parent.pi_number AS parent_pi_number
+      FROM proforma_invoices pi
+      LEFT JOIN proforma_invoices parent ON parent.id = pi.parent_pi_id
+      WHERE pi.quotation_id = $1
+      ORDER BY pi.parent_pi_id NULLS FIRST, pi.created_at ASC
+    `;
     const result = await query(sql, [quotationId]);
+    return result.rows;
+  }
+
+  /**
+   * Get the "active" PI for a quotation (for payment tracking).
+   * Returns the latest approved PI that is not superseded (i.e. either root or an approved revised PI).
+   */
+  async getActivePI(quotationId) {
+    await this.ensureSchema();
+    const sql = `
+      SELECT * FROM proforma_invoices
+      WHERE quotation_id = $1 AND status = 'approved'
+      ORDER BY parent_pi_id NULLS LAST, created_at DESC
+      LIMIT 1
+    `;
+    const result = await query(sql, [quotationId]);
+    return result.rows[0] || null;
+  }
+
+  /**
+   * Create a revised PI (amendment) from an approved parent PI. Original PI is never mutated.
+   * Clone approved PI into revised PI (parent_pi_id, revision_no); product cancellation applied only on revised PI.
+   * payload: { removedItemIds: [], reducedItems: [{ quotationItemId, quantity }], subtotal, taxAmount, totalAmount, createdBy }
+   */
+  async createRevisedPI(parentPiId, payload) {
+    await this.ensureSchema();
+    const parent = await this.getById(parentPiId);
+    if (!parent) throw new Error('Parent PI not found');
+    if ((parent.status || '').toLowerCase() !== 'approved') throw new Error('Only approved PI can be amended');
+
+    const piNumber = await this.generatePINumber();
+    const reducedItems = (payload.reducedItems || []).map((item) => ({
+      quotation_item_id: item.quotation_item_id ?? item.quotationItemId,
+      quantity: Number(item.quantity) || 0
+    })).filter((item) => item.quotation_item_id != null);
+    const amendmentDetail = {
+      removed_item_ids: (payload.removedItemIds || []).map((x) => String(x)),
+      reduced_items: reducedItems
+    };
+
+    const revResult = await query(
+      'SELECT COALESCE(MAX(revision_no), 0) AS max_rev FROM proforma_invoices WHERE parent_pi_id = $1',
+      [parentPiId]
+    );
+    const revisionNo = (revResult.rows[0]?.max_rev || 0) + 1;
+
+    const sql = `
+      INSERT INTO proforma_invoices (
+        pi_number, quotation_id, customer_id, salesperson_id,
+        pi_date, valid_until, status,
+        subtotal, tax_amount, total_amount, remaining_balance,
+        template, parent_pi_id, amendment_type, amendment_detail, revision_no,
+        dispatch_mode, transport_name, vehicle_number, transport_id, lr_no,
+        courier_name, consignment_no, by_hand, post_service,
+        carrier_name, carrier_number, created_by, master_rfp_id
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, 'draft',
+        $7, $8, $9, $9,
+        $10, $11, 'product_cancellation', $12, $13,
+        $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
+      ) RETURNING *
+    `;
+    const values = [
+      piNumber,
+      parent.quotation_id,
+      parent.customer_id,
+      parent.salesperson_id,
+      parent.pi_date,
+      parent.valid_until,
+      Number(payload.subtotal),
+      Number(payload.taxAmount),
+      Number(payload.totalAmount),
+      parent.template || 'template1',
+      parentPiId,
+      JSON.stringify(amendmentDetail),
+      revisionNo,
+      parent.dispatch_mode,
+      parent.transport_name,
+      parent.vehicle_number,
+      parent.transport_id,
+      parent.lr_no,
+      parent.courier_name,
+      parent.consignment_no,
+      parent.by_hand,
+      parent.post_service,
+      parent.carrier_name,
+      parent.carrier_number,
+      payload.createdBy,
+      parent.master_rfp_id || null
+    ];
+    const result = await query(sql, values);
+    return result.rows[0];
+  }
+
+  /** Submit revised PI for DH approval */
+  async submitRevisedPI(id) {
+    await this.ensureSchema();
+    const pi = await this.getById(id);
+    if (!pi) throw new Error('PI not found');
+    if (!pi.parent_pi_id) throw new Error('Not a revised PI');
+    if (pi.status !== 'draft') throw new Error('Only draft revised PI can be submitted');
+
+    const result = await query(
+      `UPDATE proforma_invoices SET status = 'pending_approval', updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
+  }
+
+  /** DH approves revised PI; marks parent as superseded; payment tracking will use revised PI via getActivePI */
+  async approveRevisedPI(id, approvedBy) {
+    await this.ensureSchema();
+    const client = await getClient();
+    try {
+      const pi = await this.getById(id);
+      if (!pi) throw new Error('PI not found');
+      if (!pi.parent_pi_id) throw new Error('Not a revised PI');
+      if (pi.status !== 'pending_approval') throw new Error('Only pending revised PI can be approved');
+
+      await client.query('BEGIN');
+
+      await client.query(
+        `UPDATE proforma_invoices SET status = 'approved', updated_at = NOW() WHERE id = $1`,
+        [id]
+      );
+      await client.query(
+        `UPDATE proforma_invoices SET status = 'superseded', updated_at = NOW() WHERE id = $1`,
+        [pi.parent_pi_id]
+      );
+
+      await client.query('COMMIT');
+      return await this.getById(id);
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** DH rejects revised PI */
+  async rejectRevisedPI(id, rejectedBy, reason) {
+    await this.ensureSchema();
+    const pi = await this.getById(id);
+    if (!pi) throw new Error('PI not found');
+    if (!pi.parent_pi_id) throw new Error('Not a revised PI');
+    if (pi.status !== 'pending_approval') throw new Error('Only pending revised PI can be rejected');
+
+    const result = await query(
+      `UPDATE proforma_invoices SET status = 'rejected', updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    return result.rows[0];
+  }
+
+  /** List revised PIs pending DH approval */
+  async getPendingRevisedPIs() {
+    await this.ensureSchema();
+    const sql = `
+      SELECT pi.*,
+             parent.pi_number AS parent_pi_number,
+             parent.total_amount AS parent_total_amount,
+             dhl.customer AS customer_name,
+             dhl.business AS customer_business
+      FROM proforma_invoices pi
+      LEFT JOIN proforma_invoices parent ON parent.id = pi.parent_pi_id
+      LEFT JOIN department_head_leads dhl ON pi.customer_id::text = dhl.id::text
+      WHERE pi.parent_pi_id IS NOT NULL AND pi.status = 'pending_approval'
+      ORDER BY pi.created_at ASC
+    `;
+    const result = await query(sql);
     return result.rows;
   }
 

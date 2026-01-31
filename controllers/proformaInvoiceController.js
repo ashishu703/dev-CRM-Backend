@@ -118,6 +118,63 @@ class ProformaInvoiceController {
     }
   }
 
+  /** Lightweight PI summary for fast View open. No products/payments. */
+  async getSummary(req, res) {
+    try {
+      const { id } = req.params;
+      const pi = await ProformaInvoice.getSummary(id);
+      if (!pi) {
+        return res.status(404).json({ success: false, message: 'Proforma Invoice not found' });
+      }
+      res.json({ success: true, data: pi });
+    } catch (error) {
+      console.error('Error fetching PI summary:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch PI summary',
+        error: error.message
+      });
+    }
+  }
+
+  /** PI products (quotation items with amendment applied for revised PI). Lazy-load. */
+  async getProducts(req, res) {
+    try {
+      const { id } = req.params;
+      const result = await ProformaInvoice.getProducts(id);
+      if (!result) {
+        return res.status(404).json({ success: false, message: 'Proforma Invoice not found' });
+      }
+      res.json({ success: true, data: result.items, pi: result.pi });
+    } catch (error) {
+      console.error('Error fetching PI products:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch PI products',
+        error: error.message
+      });
+    }
+  }
+
+  /** PI payments only (by quotation_id). Lazy-load. */
+  async getPaymentsOnly(req, res) {
+    try {
+      const { id } = req.params;
+      const payments = await ProformaInvoice.getPaymentsOnly(id);
+      if (payments === null) {
+        return res.status(404).json({ success: false, message: 'Proforma Invoice not found' });
+      }
+      res.json({ success: true, data: payments });
+    } catch (error) {
+      console.error('Error fetching PI payments:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch PI payments',
+        error: error.message
+      });
+    }
+  }
+
   // Get PI with payments
   async getWithPayments(req, res) {
     try {
@@ -186,7 +243,135 @@ class ProformaInvoiceController {
     }
   }
 
-  // Update PI
+  // Get active PI for quotation (for payment tracking: latest approved, not superseded)
+  async getActivePI(req, res) {
+    try {
+      const { quotationId } = req.params;
+      const pi = await ProformaInvoice.getActivePI(quotationId);
+      res.json({
+        success: true,
+        data: pi
+      });
+    } catch (error) {
+      console.error('Error fetching active PI:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch active PI',
+        error: error.message
+      });
+    }
+  }
+
+  // Create revised PI (amendment) from approved parent PI
+  async createRevisedPI(req, res) {
+    try {
+      const { parentPiId } = req.params;
+      const payload = {
+        removedItemIds: req.body.removedItemIds || [],
+        reducedItems: req.body.reducedItems || [],
+        subtotal: req.body.subtotal,
+        taxAmount: req.body.taxAmount,
+        totalAmount: req.body.totalAmount,
+        createdBy: req.user.email
+      };
+      const pi = await ProformaInvoice.createRevisedPI(parentPiId, payload);
+      res.status(201).json({
+        success: true,
+        message: 'Revised PI created. Submit for department head approval.',
+        data: pi
+      });
+    } catch (error) {
+      console.error('Error creating revised PI:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to create revised PI',
+        error: error.message
+      });
+    }
+  }
+
+  // Submit revised PI for DH approval
+  async submitRevisedPI(req, res) {
+    try {
+      const { id } = req.params;
+      const pi = await ProformaInvoice.submitRevisedPI(id);
+      res.json({
+        success: true,
+        message: 'Revised PI submitted for approval',
+        data: pi
+      });
+    } catch (error) {
+      console.error('Error submitting revised PI:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to submit revised PI',
+        error: error.message
+      });
+    }
+  }
+
+  // DH: List pending revised PIs
+  async getPendingRevisedPIs(req, res) {
+    try {
+      const list = await ProformaInvoice.getPendingRevisedPIs();
+      res.json({
+        success: true,
+        data: list
+      });
+    } catch (error) {
+      console.error('Error fetching pending revised PIs:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch pending revised PIs',
+        error: error.message
+      });
+    }
+  }
+
+  // DH: Approve revised PI
+  async approveRevisedPI(req, res) {
+    try {
+      const { id } = req.params;
+      const pi = await ProformaInvoice.approveRevisedPI(id, req.user.email);
+      res.json({
+        success: true,
+        message: 'Revised PI approved. It is now the active PI for this quotation.',
+        data: pi
+      });
+    } catch (error) {
+      console.error('Error approving revised PI:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to approve revised PI',
+        error: error.message
+      });
+    }
+  }
+
+  // DH: Reject revised PI
+  async rejectRevisedPI(req, res) {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+      const pi = await ProformaInvoice.rejectRevisedPI(id, req.user.email, reason);
+      res.json({
+        success: true,
+        message: 'Revised PI rejected',
+        data: pi
+      });
+    } catch (error) {
+      console.error('Error rejecting revised PI:', error);
+      res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to reject revised PI',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Update PI. Only draft (or pending_approval) PI is editable; approved/superseded are read-only.
+   */
   async update(req, res) {
     try {
       const { id } = req.params;
@@ -207,6 +392,12 @@ class ProformaInvoiceController {
         data: pi
       });
     } catch (error) {
+      if (error.message && error.message.includes('read-only')) {
+        return res.status(403).json({
+          success: false,
+          message: error.message
+        });
+      }
       console.error('Error updating PI:', error);
       res.status(500).json({
         success: false,

@@ -104,10 +104,10 @@ class PricingRfpDecisionController {
           company_name: rfpRequest.company_name,
           products: (rfpRequest.products || []).map((p) => ({
             productSpec: p.product_spec,
-            quantity: p.quantity || '',
-            length: p.length || '',
-            lengthUnit: p.length_unit || 'Mtr',
-            targetPrice: p.target_price || ''
+            quantity: p.quantity ?? p.length ?? '',
+            quantityUnit: p.length_unit || 'Mtr',
+            targetPrice: p.target_price || '',
+            calculator_log: p.calculator_log || null
           })),
           delivery_timeline: rfpRequest.delivery_timeline,
           special_requirements: rfpRequest.special_requirements,
@@ -132,10 +132,57 @@ class PricingRfpDecisionController {
         decision.calculator_total_price = rfpRequest.calculator_total_price;
         decision.calculator_pricing_log = calculatorLog;
         decision.rfp_request = rfpRequest;
+        // Merge calculator_log from rfp_request_products into decision.products so frontend has per-product base rate
+        if (decision.products && Array.isArray(decision.products) && rfpRequest.products && rfpRequest.products.length > 0) {
+          const rfpProductsBySpec = {};
+          rfpRequest.products.forEach((p) => {
+            const spec = (p.product_spec || '').trim().toLowerCase();
+            if (spec) rfpProductsBySpec[spec] = p;
+          });
+          decision.products = decision.products.map((dp) => {
+            const spec = (dp.productSpec || dp.product_spec || '').trim().toLowerCase();
+            const rfpProd = rfpProductsBySpec[spec];
+            return rfpProd
+              ? { ...dp, calculator_log: dp.calculator_log || rfpProd.calculator_log, targetPrice: dp.targetPrice ?? rfpProd.target_price }
+              : dp;
+          });
+        }
       }
       
       if (!decision) {
         return res.status(404).json({ success: false, message: 'RFP not found' });
+      }
+
+      const decisionLeadId = decision.lead_id ?? (decision.rfp_request && decision.rfp_request.lead_id);
+      const requestedLeadId = req.query.leadId != null ? String(req.query.leadId).trim() : null;
+      if (requestedLeadId && decisionLeadId != null && String(decisionLeadId) !== requestedLeadId) {
+        let linkedToLeadName = null;
+        try {
+          const dhl = await query(
+            'SELECT customer, business FROM department_head_leads WHERE id = $1 LIMIT 1',
+            [decisionLeadId]
+          );
+          if (dhl.rows && dhl.rows[0]) {
+            linkedToLeadName = (dhl.rows[0].customer || dhl.rows[0].business || '').trim() || null;
+          }
+          if (!linkedToLeadName) {
+            const sl = await query(
+              'SELECT name, business FROM salesperson_leads WHERE id = $1 LIMIT 1',
+              [decisionLeadId]
+            );
+            if (sl.rows && sl.rows[0]) {
+              linkedToLeadName = (sl.rows[0].name || sl.rows[0].business || '').trim() || null;
+            }
+          }
+        } catch (e) {
+          // ignore; linkedToLeadName stays null
+        }
+        const displayName = linkedToLeadName || 'another lead';
+        return res.status(403).json({
+          success: false,
+          message: `This RFP ID is linked to ${displayName}. Use the RFP ID that belongs to this lead only.`,
+          linkedToLeadName: linkedToLeadName || undefined
+        });
       }
 
       // Parse JSONB products if it's a string

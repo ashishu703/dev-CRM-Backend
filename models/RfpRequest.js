@@ -84,7 +84,7 @@ class RfpRequest extends BaseModel {
           product.productSpec || '',
           product.quantity || 0,
           product.length || null,
-          product.lengthUnit || 'Mtr',
+          product.quantityUnit || product.lengthUnit || 'Mtr',
           product.targetPrice ? parseFloat(product.targetPrice) : null,
           product.availabilityStatus || null
         ]);
@@ -216,7 +216,7 @@ class RfpRequest extends BaseModel {
     if (rfps.length > 0) {
       const rfpIds = rfps.map(r => r.id);
       const productsQuery = `
-        SELECT rfp_request_id, id, product_spec, quantity, length, length_unit, target_price, availability_status
+        SELECT rfp_request_id, id, product_spec, quantity, length, length_unit, target_price, availability_status, calculator_log
         FROM rfp_request_products
         WHERE rfp_request_id = ANY($1)
         ORDER BY rfp_request_id, id ASC

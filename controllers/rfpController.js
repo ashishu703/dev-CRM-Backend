@@ -376,7 +376,15 @@ class RfpController {
         totalAmount,
         status: 'draft',
         rfpRequestId: rfp.id,
-        rfpId: rfp.rfp_id
+        rfpId: rfp.rfp_id,
+        masterRfpId: rfp.master_rfp_id || rfp.rfp_id,
+        bankDetails: {
+          accountHolderName: 'ANODE ELECTRIC PVT. LTD.',
+          bankName: 'ICICI Bank',
+          branchName: 'WRIGHT TOWN JABALPUR',
+          accountNumber: '657605601783',
+          ifscCode: 'ICIC0006576'
+        }
       };
 
       const items = [

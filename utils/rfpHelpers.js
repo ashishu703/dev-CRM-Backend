@@ -13,9 +13,8 @@ const transformProductsForPricingDecision = (products) => {
   
   return products.map(product => ({
     productSpec: product.product_spec || '',
-    quantity: product.quantity || '',
-    length: product.length || '',
-    lengthUnit: product.length_unit || 'Mtr',
+    quantity: product.quantity ?? product.length ?? '',
+    quantityUnit: product.length_unit || 'Mtr',
     targetPrice: product.target_price ? String(product.target_price) : ''
   }))
 }
